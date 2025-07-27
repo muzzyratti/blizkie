@@ -54,3 +54,30 @@ def get_activity(age: int, time_required: str, energy: str, location: str):
         return None
 
     return random.choice(filtered)
+
+
+def add_favorite(user_id: int, activity_id: int):
+    # Проверяем нет ли уже в избранном
+    exists = supabase.table("favorites").select("*").eq("user_id", user_id).eq("activity_id", activity_id).execute()
+    if exists.data:
+        return False  # уже в избранном
+    supabase.table("favorites").insert({"user_id": user_id, "activity_id": activity_id}).execute()
+    return True
+
+
+def remove_favorite(user_id: int, activity_id: int):
+    supabase.table("favorites").delete().eq("user_id", user_id).eq("activity_id", activity_id).execute()
+    return True
+
+
+def get_favorites(user_id: int):
+    # Получаем список activity_id
+    favs = supabase.table("favorites").select("activity_id").eq("user_id", user_id).order("created_at", desc=True).execute()
+    activity_ids = [f["activity_id"] for f in favs.data]
+    if not activity_ids:
+        return []
+    # Получаем сами активности
+    activities = supabase.table("activities").select("*").in_("id", activity_ids).execute()
+    # Сортируем в том порядке, как в избранном
+    activities_map = {a["id"]: a for a in activities.data}
+    return [activities_map[i] for i in activity_ids if i in activities_map]
