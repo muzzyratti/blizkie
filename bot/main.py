@@ -9,13 +9,17 @@ from handlers.update_filters import update_filters_router
 
 logger = setup_logger()
 
+
 async def set_bot_commands(bot):
     commands = [
         BotCommand(command="start", description="Начать"),
         BotCommand(command="favorites", description="Мои любимые"),
         BotCommand(command="update_filters", description="Хочу другие советы"),
+        BotCommand(command="feedback",
+                   description="🧸 Поделитесь словом или ошибкой 💛"),
     ]
     await bot.set_my_commands(commands)
+
 
 async def main():
     bot = Bot(token=BOT_TOKEN)
@@ -31,6 +35,7 @@ async def main():
     logger.info("Бот запускается...")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
