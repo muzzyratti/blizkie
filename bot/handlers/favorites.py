@@ -15,8 +15,8 @@ async def favorite_add(callback: types.CallbackQuery):
 
     add_favorite(user_id=user_id, activity_id=activity_id)
 
-    # Получаем активность
-    response = supabase.table("activities").select("*").eq("id", activity_id).execute()
+    response = supabase.table("activities").select("*").eq(
+        "id", activity_id).execute()
     if not response.data:
         await callback.message.answer("😔 Не удалось найти активность.")
         await callback.answer()
@@ -30,34 +30,37 @@ async def favorite_add(callback: types.CallbackQuery):
         f"⏱️ {activity['time_required']} • ⚡️ {activity['energy']} • 📍 {activity['location']}\n\n"
         f"Материалы: {activity['materials'] or 'Не требуются'}\n\n"
         f"{activity['full_description']}\n\n"
-        f"{summary}"
-    )
+        f"{summary}")
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[
-            InlineKeyboardButton(text="Убрать из любимых ✖️", callback_data=f"remove_fav:{activity_id}"),
-            InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")
-        ]]
-    )
+    row1 = [
+        InlineKeyboardButton(text="Убрать из любимых ✖️",
+                             callback_data=f"remove_fav:{activity_id}"),
+        InlineKeyboardButton(text="Покажи еще идею",
+                             callback_data="activity_next")
+    ]
+    row2 = [
+        InlineKeyboardButton(text="Хочу другие советы",
+                             callback_data="update_filters"),
+        InlineKeyboardButton(text="Поделиться идеей 💌",
+                             callback_data=f"share_activity:{activity_id}")
+    ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[row1, row2])
 
     try:
-        await callback.message.edit_caption(
-            caption=text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
+        await callback.message.edit_caption(caption=text,
+                                            parse_mode="Markdown",
+                                            reply_markup=keyboard)
     except Exception:
-        await callback.message.answer_photo(
-            photo=activity["image_url"],
-            caption=text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
+        await callback.message.answer_photo(photo=activity["image_url"],
+                                            caption=text,
+                                            parse_mode="Markdown",
+                                            reply_markup=keyboard)
 
     await callback.answer("Добавлено в любимые ❤️")
 
 
-async def list_favorites(message_or_callback: types.Message | types.CallbackQuery):
+async def list_favorites(message_or_callback: types.Message
+                         | types.CallbackQuery):
     user_id = message_or_callback.from_user.id
 
     favorites_response = supabase.table("favorites") \
@@ -90,30 +93,29 @@ async def list_favorites(message_or_callback: types.Message | types.CallbackQuer
         return
 
     id_to_activity = {a["id"]: a for a in activities_response.data}
-    sorted_activities = [id_to_activity[aid] for aid in activity_ids if aid in id_to_activity]
+    sorted_activities = [
+        id_to_activity[aid] for aid in activity_ids if aid in id_to_activity
+    ]
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=activity["title"],
-                    callback_data=f"activity_details:{activity['id']}"),
-                InlineKeyboardButton(
-                    text="✖️",
-                    callback_data=f"remove_fav:{activity['id']}")
-            ]
-            for activity in sorted_activities
-        ]
-    )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text=activity["title"],
+            callback_data=f"activity_details:{activity['id']}"),
+        InlineKeyboardButton(text="✖️",
+                             callback_data=f"remove_fav:{activity['id']}")
+    ] for activity in sorted_activities])
 
     if isinstance(message_or_callback, types.CallbackQuery):
         try:
-            await message_or_callback.message.edit_text("Ваши любимые активности:", reply_markup=keyboard)
+            await message_or_callback.message.edit_text(
+                "Ваши любимые активности:", reply_markup=keyboard)
         except Exception:
-            await message_or_callback.message.answer("Ваши любимые активности:", reply_markup=keyboard)
+            await message_or_callback.message.answer(
+                "Ваши любимые активности:", reply_markup=keyboard)
         await message_or_callback.answer()
     else:
-        await message_or_callback.answer("Ваши любимые активности:", reply_markup=keyboard)
+        await message_or_callback.answer("Ваши любимые активности:",
+                                         reply_markup=keyboard)
 
 
 @favorites_router.message(Command("favorites"))
