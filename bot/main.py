@@ -10,6 +10,7 @@ from handlers.favorites import favorites_router
 from handlers.update_filters import update_filters_router
 from handlers.feedback import feedback_router
 from handlers.subscribe import subscribe_router
+from handlers import donate
 
 logger = setup_logger()
 
@@ -23,6 +24,7 @@ async def set_bot_commands(bot):
         BotCommand(command="feedback",
                    description="🧸 Поделитесь словом или ошибкой в боте"),
         BotCommand(command="subscribe", description="📢 Подпишитесь на канал"),
+        BotCommand(command="donate", description="Поддержать проект 💛"),
     ]
     await bot.set_my_commands(commands)
 
@@ -38,6 +40,7 @@ async def main():
     dp.include_router(update_filters_router)
     dp.include_router(feedback_router)
     dp.include_router(subscribe_router)
+    dp.include_router(donate.router)
 
     logger.info("Устанавливаем команды бота...")
     await set_bot_commands(bot)

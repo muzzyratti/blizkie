@@ -11,73 +11,69 @@ from .start import user_data
 favorites_router = Router()
 
 
-    @favorites_router.callback_query(F.data.startswith("favorite_add:"))
-    async def favorite_add(callback: types.CallbackQuery):
-        activity_id = int(callback.data.split(":")[1])
-        user_id = callback.from_user.id
+@favorites_router.callback_query(F.data.startswith("favorite_add:"))
+async def favorite_add(callback: types.CallbackQuery):
+    activity_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
 
-        add_favorite(user_id=user_id, activity_id=activity_id)
+    add_favorite(user_id=user_id, activity_id=activity_id)
 
-        response = supabase.table("activities").select("*").eq("id", activity_id).execute()
-        if not response.data:
-            await callback.message.answer("😔 Не удалось найти активность.")
-            await callback.answer()
-            return
+    response = supabase.table("activities").select("*").eq(
+        "id", activity_id).execute()
+    if not response.data:
+        await callback.message.answer("😔 Не удалось найти активность.")
+        await callback.answer()
+        return
 
-        activity = response.data[0]
+    activity = response.data[0]
 
-        try:
-            log_event(user_id=user_id,
-                      event_name="favourites_add",
-                      event_properties={
-                          "activity_id": activity_id,
-                          "age": activity.get("age_min"),
-                          "time": activity.get("time_required"),
-                          "energy": activity.get("energy"),
-                          "location": activity.get("location")
-                      },
-                      session_id=user_data.get(user_id, {}).get("session_id"))
-        except Exception as e:
-            print(f"[Amplitude] Failed to log favourites_add: {e}")
+    try:
+        log_event(user_id=user_id,
+                  event_name="favourites_add",
+                  event_properties={
+                      "activity_id": activity_id,
+                      "age": activity.get("age_min"),
+                      "time": activity.get("time_required"),
+                      "energy": activity.get("energy"),
+                      "location": activity.get("location")
+                  },
+                  session_id=user_data.get(user_id, {}).get("session_id"))
+    except Exception as e:
+        print(f"[Amplitude] Failed to log favourites_add: {e}")
 
-        # 👉 Показ кнопки подписки
-        user_flags = user_data.setdefault(user_id, {})
-        if user_flags.get("subscribed_to_channel") is not True and not user_flags.get("subscribe_prompt_shown"):
-            user_flags["subscribe_prompt_shown"] = True
+    summary = "\n".join([f"💡 {s}" for s in (activity['summary'] or [])])
+    text = (
+        f"🎲 *{activity['title']}*\n\n"
+        f"⏱️ {activity['time_required']} • ⚡️ {activity['energy']} • 📍 {activity['location']}\n\n"
+        f"Материалы: {activity['materials'] or 'Не требуются'}\n\n"
+        f"{activity['full_description']}\n\n"
+        f"{summary}")
 
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="🔔 Подписаться на канал", url="https://t.me/blizkie_igry")
-            ]])
-            await callback.message.answer(
-                "Спасибо за добавление 💛\n\nПодпишись на канал, чтобы не пропустить вдохновение!",
-                reply_markup=keyboard
-            )
+    row1 = [
+        InlineKeyboardButton(text="Убрать из любимых ✖️",
+                             callback_data=f"remove_fav:{activity_id}"),
+        InlineKeyboardButton(text="Покажи еще идею",
+                             callback_data="activity_next")
+    ]
+    row2 = [
+        InlineKeyboardButton(text="Хочу другие советы",
+                             callback_data="update_filters"),
+        InlineKeyboardButton(text="Поделиться идеей 💌",
+                             callback_data=f"share_activity:{activity_id}")
+    ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[row1, row2])
 
-        summary = "\n".join([f"💡 {s}" for s in (activity['summary'] or [])])
-        text = (
-            f"🎲 *{activity['title']}*\n\n"
-            f"⏱️ {activity['time_required']} • ⚡️ {activity['energy']} • 📍 {activity['location']}\n\n"
-            f"Материалы: {activity['materials'] or 'Не требуются'}\n\n"
-            f"{activity['full_description']}\n\n"
-            f"{summary}")
+    try:
+        await callback.message.edit_caption(caption=text,
+                                            parse_mode="Markdown",
+                                            reply_markup=keyboard)
+    except Exception:
+        await callback.message.answer_photo(photo=activity["image_url"],
+                                            caption=text,
+                                            parse_mode="Markdown",
+                                            reply_markup=keyboard)
 
-        row1 = [
-            InlineKeyboardButton(text="Убрать из любимых ✖️", callback_data=f"remove_fav:{activity_id}"),
-            InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")
-        ]
-        row2 = [
-            InlineKeyboardButton(text="Хочу другие советы", callback_data="update_filters"),
-            InlineKeyboardButton(text="Поделиться идеей 💌", callback_data=f"share_activity:{activity_id}")
-        ]
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[row1, row2])
-
-        try:
-            await callback.message.edit_caption(caption=text, parse_mode="Markdown", reply_markup=keyboard)
-        except Exception:
-            await callback.message.answer_photo(photo=activity["image_url"], caption=text,
-                                                parse_mode="Markdown", reply_markup=keyboard)
-
-        await callback.answer("Добавлено в любимые ❤️")
+    await callback.answer("Добавлено в любимые ❤️")
 
 
 async def list_favorites(message_or_callback: types.Message

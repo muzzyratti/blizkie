@@ -3,15 +3,8 @@ from keyboards.onboarding import age_keyboard, time_keyboard, energy_keyboard, p
 from utils.amplitude_logger import log_event, set_user_properties
 from .user_state import user_data
 from .activities import send_activity, show_next_activity
-from db.user_sessions import save_user_session
 
 onboarding_router = Router()
-
-
-def try_save_session(user_id: int):
-  filters = user_data.get(user_id, {})
-  if all(k in filters for k in ("age", "time", "energy", "place")):
-    save_user_session(user_id, filters)
 
 
 @onboarding_router.callback_query(F.data == "start_onboarding")
@@ -36,8 +29,6 @@ async def process_age(callback: types.CallbackQuery):
   log_event(user_id, "set_age", {"age": age})
   set_user_properties(user_id, {"age": age})
 
-  try_save_session(user_id)
-
   mode = user_data[user_id].get("mode")
   if mode == "onboarding":
     await callback.message.answer(
@@ -60,8 +51,6 @@ async def process_time(callback: types.CallbackQuery):
   log_event(user_id, "set_time", {"time": time_choice})
   set_user_properties(user_id, {"time": time_choice})
 
-  try_save_session(user_id)
-
   mode = user_data[user_id].get("mode")
   if mode == "onboarding":
     await callback.message.answer(
@@ -82,8 +71,6 @@ async def process_energy(callback: types.CallbackQuery):
   log_event(user_id, "set_energy", {"energy": energy_choice})
   set_user_properties(user_id, {"energy": energy_choice})
 
-  try_save_session(user_id)
-
   mode = user_data[user_id].get("mode")
   if mode == "onboarding":
     await callback.message.answer("Где будете проводить время?",
@@ -102,8 +89,6 @@ async def process_place(callback: types.CallbackQuery):
 
   log_event(user_id, "set_place", {"place": place_choice})
   set_user_properties(user_id, {"place": place_choice})
-
-  try_save_session(user_id)
 
   mode = user_data[user_id].get("mode")
   if mode == "onboarding":
