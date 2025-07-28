@@ -6,6 +6,8 @@ from utils.logger import setup_logger
 from handlers import start
 from handlers.favorites import favorites_router
 from handlers.update_filters import update_filters_router
+from handlers.feedback import feedback_router
+from handlers.subscribe import subscribe_router
 
 logger = setup_logger()
 
@@ -17,6 +19,7 @@ async def set_bot_commands(bot):
         BotCommand(command="update_filters", description="Хочу другие советы"),
         BotCommand(command="feedback",
                    description="🧸 Поделитесь словом или ошибкой 💛"),
+        BotCommand(command="subscribe", description="📢 Подписаться на канал"),
     ]
     await bot.set_my_commands(commands)
 
@@ -28,6 +31,8 @@ async def main():
     dp.include_router(start.router)
     dp.include_router(favorites_router)
     dp.include_router(update_filters_router)
+    dp.include_router(feedback_router)
+    dp.include_router(subscribe_router)
 
     logger.info("Устанавливаем команды бота...")
     await set_bot_commands(bot)
