@@ -5,6 +5,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from db.supabase_client import add_favorite, get_favorites
 from db.supabase_client import supabase
 
+from utils.amplitude_logger import log_event
+from .start import user_data
+
 favorites_router = Router()
 
 
@@ -23,6 +26,20 @@ async def favorite_add(callback: types.CallbackQuery):
         return
 
     activity = response.data[0]
+
+    try:
+        log_event(user_id=user_id,
+                  event_name="favourites_add",
+                  event_properties={
+                      "activity_id": activity_id,
+                      "age": activity.get("age_min"),
+                      "time": activity.get("time_required"),
+                      "energy": activity.get("energy"),
+                      "location": activity.get("location")
+                  },
+                  session_id=user_data.get(user_id, {}).get("session_id"))
+    except Exception as e:
+        print(f"[Amplitude] Failed to log favourites_add: {e}")
 
     summary = "\n".join([f"💡 {s}" for s in (activity['summary'] or [])])
     text = (
@@ -62,6 +79,13 @@ async def favorite_add(callback: types.CallbackQuery):
 async def list_favorites(message_or_callback: types.Message
                          | types.CallbackQuery):
     user_id = message_or_callback.from_user.id
+
+    try:
+        log_event(user_id=user_id,
+                  event_name="favourites_list",
+                  session_id=user_data.get(user_id, {}).get("session_id"))
+    except Exception as e:
+        print(f"[Amplitude] Failed to log favourites_list: {e}")
 
     favorites_response = supabase.table("favorites") \
         .select("activity_id") \
@@ -134,6 +158,14 @@ async def remove_favorite(callback: types.CallbackQuery):
         .eq("activity_id", activity_id) \
         .execute()
 
+    try:
+        log_event(user_id=user_id,
+                  event_name="favourites_remove",
+                  event_properties={"activity_id": activity_id},
+                  session_id=user_data.get(user_id, {}).get("session_id"))
+    except Exception as e:
+        print(f"[Amplitude] Failed to log favourites_remove: {e}")
+
     await list_favorites(callback)
 
 
@@ -180,5 +212,21 @@ async def share_activity(callback: types.CallbackQuery):
     except Exception as e:
         await callback.message.answer("⚠️ Не удалось поделиться идеей.")
         print("Ошибка при отправке идеи:", e)
+
+    # ✅ Логирование события
+    try:
+        log_event(user_id=callback.from_user.id,
+                  event_name="share_activity",
+                  event_properties={
+                      "activity_id": activity_id,
+                      "age": activity.get("age_min"),
+                      "time": activity.get("time_required"),
+                      "energy": activity.get("energy"),
+                      "location": activity.get("location")
+                  },
+                  session_id=user_data.get(callback.from_user.id,
+                                           {}).get("session_id"))
+    except Exception as e:
+        print(f"[Amplitude] Failed to log share_activity: {e}")
 
     await callback.answer("Можно переслать идею 💌")
