@@ -24,8 +24,8 @@ TIME_MAP = {
 }
 
 location_MAP = {
-    "home": "Дома",
-    "outside": "На улице"
+    "outside": "На улице",
+    "home": "Дома"
 }
 
 

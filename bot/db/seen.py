@@ -1,5 +1,5 @@
 from datetime import datetime
-from db.supabase_client import supabase
+from db.supabase_client import supabase, TIME_MAP, ENERGY_MAP, location_MAP
 import logging
 from random import choice
 
@@ -11,9 +11,16 @@ def get_next_activity_with_filters(user_id: int, age: int, time: str,
     )
 
     # 1. Получаем все подходящие активности
+    mapped_location = location_MAP.get(location, location)
+    mapped_energy = ENERGY_MAP.get(energy, energy)
+    mapped_time = TIME_MAP.get(time, time)
+
     activities = supabase.table("activities") \
         .select("id") \
         .eq("age_min", age) \
+        .eq("time_required", mapped_time) \
+        .eq("energy", mapped_energy) \
+        .eq("location", mapped_location) \
         .execute().data
 
     all_ids = [a["id"] for a in activities]
