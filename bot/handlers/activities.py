@@ -121,28 +121,28 @@ async def show_activity_details(callback: types.CallbackQuery):
         f"{activity['full_description']}\n\n"
         f"{summary}")
 
-    row1 = []
-    if is_favorite:
-        row1.append(
-            InlineKeyboardButton(text="Убрать из любимых ✖️",
-                                 callback_data=f"remove_fav:{activity_id}"))
-    else:
-        row1.append(
-            InlineKeyboardButton(text="Добавить в любимые ❤️",
-                                 callback_data=f"favorite_add:{activity_id}"))
-
-    row1.append(
-        InlineKeyboardButton(text="Покажи еще идею",
-                             callback_data="activity_next"))
-
-    row2 = [
-        InlineKeyboardButton(text="Хочу другие фильтры",
-                             callback_data="update_filters"),
-        InlineKeyboardButton(text="Поделиться идеей 💌",
-                             callback_data=f"share_activity:{activity_id}")
-    ]
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[row1, row2])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="Добавить в любимые ❤️"
+                if not is_favorite else "Убрать из любимых ✖️",
+                callback_data=
+                f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(text="Покажи еще идею",
+                                 callback_data="activity_next")
+        ],
+        [
+            InlineKeyboardButton(text="Хочу другие фильтры",
+                                 callback_data="update_filters")
+        ],
+        [
+            InlineKeyboardButton(text="Поделиться идеей 💌",
+                                 callback_data=f"share_activity:{activity_id}")
+        ]
+    ])
 
     log_event(user_id=callback.from_user.id,
               event_name="show_activity_L1",
@@ -166,18 +166,27 @@ async def show_activity_details(callback: types.CallbackQuery):
 @activities_router.callback_query(F.data == "activity_next")
 async def show_next_activity(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    filters = user_data.get(callback.from_user.id)
+    filters = user_data.get(user_id)
+
+    # ✅ Если фильтров нет в памяти — достаём из Supabase
     if not filters:
-        await callback.message.answer("Сначала пройдите подбор заново: /start")
-        await callback.answer()
-        return
+        response = supabase.table("user_filters").select("*").eq(
+            "user_id", user_id).execute()
+        if not response.data:
+            await callback.message.answer(
+                "Сначала пройдите подбор заново: /start")
+            await callback.answer()
+            return
+
+        filters = response.data[0]
+        user_data[user_id] = filters  # 💾 Сохраняем в память для следующих запросов
 
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=user_id,
         age=int(filters["age"]),
         time=filters["time"],
         energy=filters["energy"],
-        place=filters["place"])
+        place=filters["location"])
 
     activity = get_activity_by_id(activity_id)
 
@@ -215,7 +224,7 @@ async def show_next_activity(callback: types.CallbackQuery):
                   "age": filters["age"],
                   "time": filters["time"],
                   "energy": filters["energy"],
-                  "location": filters["place"]
+                  "location": filters["location"]
               },
               session_id=filters.get("session_id"))
 
@@ -226,7 +235,7 @@ async def show_next_activity(callback: types.CallbackQuery):
                   "age": filters["age"],
                   "time": filters["time"],
                   "energy": filters["energy"],
-                  "location": filters["place"]
+                  "location": filters["location"]
               },
               session_id=filters.get("session_id"))
 
@@ -236,15 +245,22 @@ async def show_next_activity(callback: types.CallbackQuery):
                                         reply_markup=keyboard)
 
     supabase.table("seen_activities").upsert({
-        "user_id": user_id,
-        "activity_id": activity["id"],
-        "age": filters["age"],
-        "time": filters["time"],
-        "energy": filters["energy"],
-        "place": filters["place"],
-        "seen_at": datetime.now().isoformat()
+        "user_id":
+        user_id,
+        "activity_id":
+        activity["id"],
+        "age":
+        filters["age"],
+        "time":
+        filters["time"],
+        "energy":
+        filters["energy"],
+        "place":
+        filters["location"],
+        "seen_at":
+        datetime.now().isoformat()
     }).execute()
-    
+
     await callback.answer()
 
 
@@ -254,15 +270,20 @@ async def next_command_handler(message: types.Message):
     filters = user_data.get(user_id)
 
     if not filters:
-        await message.answer("Сначала пройдите подбор заново: /start")
-        return
+        response = supabase.table("user_filters").select("*").eq("user_id", user_id).execute()
+        if not response.data:
+            await message.answer("Сначала пройдите подбор заново: /start")
+            return
+
+        filters = response.data[0]
+        user_data[user_id] = filters  # 💾 Сохраняем в память
 
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=user_id,
         age=int(filters["age"]),
         time=filters["time"],
         energy=filters["energy"],
-        place=filters["place"])
+        place=filters["location"])
 
     activity = get_activity_by_id(activity_id)
 
@@ -297,15 +318,22 @@ async def next_command_handler(message: types.Message):
                                reply_markup=keyboard)
 
     supabase.table("seen_activities").upsert({
-        "user_id": user_id,
-        "activity_id": activity["id"],
-        "age": filters["age"],
-        "time": filters["time"],
-        "energy": filters["energy"],
-        "place": filters["place"],
-        "seen_at": datetime.now().isoformat()
+        "user_id":
+        user_id,
+        "activity_id":
+        activity["id"],
+        "age":
+        filters["age"],
+        "time":
+        filters["time"],
+        "energy":
+        filters["energy"],
+        "place":
+        filters["location"],
+        "seen_at":
+        datetime.now().isoformat()
     }).execute()
-    
+
     log_event(user_id=user_id,
               event_name="show_next_activity",
               event_properties={
@@ -313,7 +341,7 @@ async def next_command_handler(message: types.Message):
                   "age": filters["age"],
                   "time": filters["time"],
                   "energy": filters["energy"],
-                  "location": filters["place"]
+                  "location": filters["location"]
               },
               session_id=filters.get("session_id"))
 
