@@ -38,6 +38,7 @@ def get_activity(age: int, time_required: str, energy: str, location: str):
     response = supabase.table("activities").select("*").execute()
     activities = response.data
     logging.info(f"Всего активностей в БД: {len(activities)}")
+    location_db = location_MAP.get(location, location)
 
     filtered = [
         a for a in activities
@@ -45,7 +46,7 @@ def get_activity(age: int, time_required: str, energy: str, location: str):
         and a["age_min"] <= age <= a["age_max"]
         and normalize(a.get("time_required")) == normalize(time_required)
         and normalize(a.get("energy")) == normalize(energy)
-        and normalize(a.get("location")) == normalize(location)
+        and normalize(a.get("location")) == normalize(location_db)
     ]
 
     logging.info(f"Подходящих активностей: {len(filtered)}")

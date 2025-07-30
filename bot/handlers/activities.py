@@ -26,6 +26,10 @@ async def send_activity(callback: types.CallbackQuery):
         energy=filters["energy"],
         location=filters["location"])
 
+    if activity_id is None:
+        await callback.message.answer("😔 Нет идей для таких условий, попробуйте изменить фильтры.")
+        return
+    
     activity = get_activity_by_id(activity_id)
 
     if not activity:
@@ -188,6 +192,10 @@ async def show_next_activity(callback: types.CallbackQuery):
         energy=filters["energy"],
         location=filters["location"])
 
+    if activity_id is None:
+        await callback.message.answer("😔 Нет идей для таких условий, попробуйте изменить фильтры.")
+        return
+    
     activity = get_activity_by_id(activity_id)
 
     if not activity:
@@ -285,6 +293,10 @@ async def next_command_handler(message: types.Message):
         energy=filters["energy"],
         location=filters["location"])
 
+    if activity_id is None:
+        await callback.message.answer("😔 Нет идей для таких условий, попробуйте изменить фильтры.")
+        return
+    
     activity = get_activity_by_id(activity_id)
 
     if not activity:
