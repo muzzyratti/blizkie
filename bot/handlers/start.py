@@ -1,7 +1,6 @@
 from aiogram import Router, types
 from aiogram.filters import CommandStart
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
 from keyboards.common import start_inline_keyboard
 from db.supabase_client import supabase, ENERGY_MAP, TIME_MAP, PLACE_MAP
 from utils.amplitude_logger import log_event
