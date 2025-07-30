@@ -7,6 +7,7 @@ from handlers import start
 from handlers.onboarding import onboarding_router
 from handlers.activities import activities_router
 from handlers.favorites import favorites_router
+from handlers.share import share_router
 from handlers.update_filters import update_filters_router
 from handlers.feedback import feedback_router
 from handlers.subscribe import subscribe_router
@@ -20,9 +21,9 @@ async def set_bot_commands(bot):
         BotCommand(command="start", description="Начать заново"),
         BotCommand(command="next", description="Показать ещё идею"),
         BotCommand(command="favorites", description="Мои любимые"),
-        BotCommand(command="update_filters", description="Хочу другие советы"),
+        BotCommand(command="update_filters", description="Хочу другие фильтры"),
         BotCommand(command="feedback",
-                   description="🧸 Поделитесь словом или ошибкой в боте"),
+                   description="🧸 Поделитесь мнением или ошибкой в боте"),
         BotCommand(command="subscribe", description="📢 Подпишитесь на канал"),
         BotCommand(command="donate", description="Поддержать проект 💛"),
     ]
@@ -37,6 +38,7 @@ async def main():
     dp.include_router(onboarding_router)
     dp.include_router(activities_router)
     dp.include_router(favorites_router)
+    dp.include_router(share_router)
     dp.include_router(update_filters_router)
     dp.include_router(feedback_router)
     dp.include_router(subscribe_router)

@@ -1,9 +1,10 @@
 from aiogram import Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from db.supabase_client import get_activity, supabase, TIME_MAP, ENERGY_MAP, PLACE_MAP
 from utils.amplitude_logger import log_event
 from .user_state import user_data
+import os
 
 activities_router = Router()
 
@@ -36,7 +37,7 @@ async def send_activity(callback: types.CallbackQuery):
                                  callback_data="activity_next")
         ],
         [
-            InlineKeyboardButton(text="Хочу другие советы",
+            InlineKeyboardButton(text="Хочу другие фильтры",
                                  callback_data="update_filters")
         ]
     ])
@@ -105,7 +106,7 @@ async def show_activity_details(callback: types.CallbackQuery):
                              callback_data="activity_next"))
 
     row2 = [
-        InlineKeyboardButton(text="Хочу другие советы",
+        InlineKeyboardButton(text="Хочу другие фильтры",
                              callback_data="update_filters"),
         InlineKeyboardButton(text="Поделиться идеей 💌",
                              callback_data=f"share_activity:{activity_id}")
@@ -166,7 +167,7 @@ async def show_next_activity(callback: types.CallbackQuery):
                                  callback_data="activity_next")
         ],
         [
-            InlineKeyboardButton(text="Хочу другие советы",
+            InlineKeyboardButton(text="Хочу другие фильтры",
                                  callback_data="update_filters")
         ]
     ])
@@ -230,7 +231,7 @@ async def next_command_handler(message: types.Message):
                               callback_data=f"activity_details:{activity['id']}")],
         [InlineKeyboardButton(text="Покажи еще идею",
                               callback_data="activity_next")],
-        [InlineKeyboardButton(text="Хочу другие советы",
+        [InlineKeyboardButton(text="Хочу другие фильтры",
                               callback_data="update_filters")]
     ])
 
@@ -249,3 +250,72 @@ async def next_command_handler(message: types.Message):
                   "location": filters["place"]
               },
               session_id=filters.get("session_id"))
+
+
+@activities_router.message(Command("show_activity"))
+async def show_activity_by_id(message: types.Message, command: CommandObject):
+    admin_id = int(os.getenv("ADMIN_USER_ID"))
+    if message.from_user.id != admin_id:
+        await message.answer("⛔ Эта команда только для разработчика.")
+        return
+
+    activity_id_str = command.args
+    if not activity_id_str or not activity_id_str.isdigit():
+        await message.answer("⚠️ Укажи ID активности: /show_activity 87")
+        return
+
+    activity_id = int(activity_id_str)
+
+    response = supabase.table("activities").select("*").eq("id", activity_id).execute()
+    if not response.data:
+        await message.answer("😔 Не удалось найти активность.")
+        return
+
+    activity = response.data[0]
+
+    summary = "\n".join([f"💡 {s}" for s in (activity.get("summary") or [])])
+    caption = f"🎲 Идея для родителя: *{activity['title']}*"
+    full_text = (
+        f"⏱️ {activity.get('time_required', 'не указано')} • "
+        f"⚡️ {activity.get('energy', 'не указана')} • "
+        f"📍 {activity.get('location', 'не указано')}\n\n"
+        f"📦 Материалы: {activity.get('materials') or 'Не требуются'}\n\n"
+        f"{activity.get('full_description', '')}\n\n"
+        f"{summary}"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Добавить в любимые ❤️", callback_data=f"favorite_add:{activity_id}"),
+            InlineKeyboardButton(text="Показать ещё", callback_data="activity_next")
+        ],
+        [
+            InlineKeyboardButton(text="Поделиться 💌", callback_data=f"share_activity:{activity_id}"),
+            InlineKeyboardButton(text="Другие фильтры", callback_data="update_filters")
+        ]
+    ])
+
+    try:
+        await message.answer_photo(
+            photo=activity["image_url"],
+            caption=caption[:1024],
+            parse_mode="Markdown"
+        )
+        await message.answer(full_text, parse_mode="Markdown", reply_markup=keyboard)
+    except Exception as e:
+        await message.answer("⚠️ Ошибка при отправке активности.")
+        print("Ошибка в show_activity_by_id:", e)
+
+    try:
+        log_event(user_id=message.from_user.id,
+                  event_name="show_activity_by_id",
+                  event_properties={
+                      "activity_id": activity_id,
+                      "age": activity.get("age_min"),
+                      "time": activity.get("time_required"),
+                      "energy": activity.get("energy"),
+                      "location": activity.get("location")
+                  },
+                  session_id=user_data.get(message.from_user.id, {}).get("session_id"))
+    except Exception as e:
+        print(f"[Amplitude] Failed to log show_activity_by_id: {e}")

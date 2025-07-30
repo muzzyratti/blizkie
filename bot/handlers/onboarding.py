@@ -3,6 +3,7 @@ from keyboards.onboarding import age_keyboard, time_keyboard, energy_keyboard, p
 from utils.amplitude_logger import log_event, set_user_properties
 from .user_state import user_data
 from .activities import send_activity, show_next_activity
+from db.supabase_client import supabase
 
 onboarding_router = Router()
 
@@ -38,6 +39,9 @@ async def process_age(callback: types.CallbackQuery):
   elif mode == "update":
     await callback.message.answer("Возраст обновлён. Вот идея для вас 👇")
     await show_next_activity(callback)
+    supabase.table("user_filters").update({
+        "age": age
+    }).eq("user_id", user_id).execute()
 
   await callback.answer()
 
@@ -59,6 +63,10 @@ async def process_time(callback: types.CallbackQuery):
   elif mode == "update":
     await callback.message.answer("Время обновлено. Вот идея для вас 👇")
     await show_next_activity(callback)
+    supabase.table("user_filters").update({
+        "time": time_choice
+    }).eq("user_id", user_id).execute()
+
   await callback.answer()
 
 
@@ -78,6 +86,10 @@ async def process_energy(callback: types.CallbackQuery):
   elif mode == "update":
     await callback.message.answer("Энергия обновлена. Вот идея для вас 👇")
     await show_next_activity(callback)
+    supabase.table("user_filters").update({
+        "energy": energy_choice
+    }).eq("user_id", user_id).execute()
+
   await callback.answer()
 
 
@@ -93,8 +105,53 @@ async def process_place(callback: types.CallbackQuery):
   mode = user_data[user_id].get("mode")
   if mode == "onboarding":
     log_event(user_id, "onboarding_completed")
+
+    supabase.table("user_filters").upsert({
+        "user_id":
+        user_id,
+        "age":
+        user_data[user_id]["age"],
+        "time":
+        user_data[user_id]["time"],
+        "energy":
+        user_data[user_id]["energy"],
+        "location":
+        user_data[user_id]["place"]
+    }).execute()
+
     await send_activity(callback)
   elif mode == "update":
     await callback.message.answer("Место обновлено. Вот идея для вас 👇")
     await show_next_activity(callback)
+    supabase.table("user_filters").update({
+        "location": place_choice
+    }).eq("user_id", user_id).execute()
+
   await callback.answer()
+
+
+@onboarding_router.callback_query(F.data == "continue_with_filters")
+async def continue_with_saved_filters(callback: types.CallbackQuery):
+  user_id = callback.from_user.id
+
+  response = supabase.table("user_filters").select("*").eq("user_id",
+                                                           user_id).execute()
+  filters = response.data[0] if response.data else None
+
+  if not filters:
+    await callback.message.answer(
+        "Не удалось найти сохранённые фильтры 😔 Попробуйте начать заново.")
+    await callback.answer()
+    return
+
+  # Загружаем фильтры в user_data
+  user_data[user_id] = {
+      "age": filters["age"],
+      "time": filters["time"],
+      "energy": filters["energy"],
+      "place": filters["location"],
+      "mode": "onboarding"
+  }
+
+  await callback.answer("Показываю идеи по вашему выбору 👇")
+  await send_activity(callback)
