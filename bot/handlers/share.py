@@ -39,7 +39,6 @@ async def share_activity(callback: types.CallbackQuery):
         f"⚡️ {energy}\n"
         f"📍 {location}\n\n"
         f"{materials_text}"
-        f"{short_description}\n\n"
         f"{full_description}\n\n"
         f"{summary_lines}\n\n"
         f"{footer}"
