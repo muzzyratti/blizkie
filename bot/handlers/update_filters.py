@@ -5,6 +5,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from handlers.user_state import user_data
 from keyboards.onboarding import age_keyboard, time_keyboard, energy_keyboard, place_keyboard
 from db.supabase_client import TIME_MAP, ENERGY_MAP, PLACE_MAP
+from db.supabase_client import supabase
 
 from utils.amplitude_logger import log_event
 
@@ -17,13 +18,19 @@ async def show_update_options(event: types.Message | types.CallbackQuery):
     user_id = event.from_user.id
     filters = user_data.get(user_id)
     if not filters:
-        text = "Сначала пройдите подбор: /start"
-        if isinstance(event, types.CallbackQuery):
-            await event.message.answer(text)
-            await event.answer()
-        else:
-            await event.answer(text)
-        return
+        # Пробуем достать фильтры из Supabase
+        response = supabase.table("user_filters").select("*").eq(
+            "user_id", user_id).execute()
+        if not response.data:
+            text = "Сначала пройдите подбор: /start"
+            if isinstance(event, types.CallbackQuery):
+                await event.message.answer(text)
+                await event.answer()
+            else:
+                await event.answer(text)
+            return
+        filters = response.data[0]
+        user_data[user_id] = filters  # 💾 Сохраняем в память
 
     # ✅ Логирование события
     try:
@@ -33,7 +40,7 @@ async def show_update_options(event: types.Message | types.CallbackQuery):
                       "age": filters.get("age"),
                       "time": filters.get("time"),
                       "energy": filters.get("energy"),
-                      "location": filters.get("place")
+                      "location": filters.get("location")
                   },
                   session_id=filters.get("session_id"))
     except Exception as e:
@@ -41,7 +48,7 @@ async def show_update_options(event: types.Message | types.CallbackQuery):
 
     time_label = TIME_MAP.get(filters["time"], filters["time"])
     energy_label = ENERGY_MAP.get(filters["energy"], filters["energy"])
-    place_label = PLACE_MAP.get(filters["place"], filters["place"])
+    place_label = PLACE_MAP.get(filters["location"], filters["location"])
 
     text = (f"Ваш текущий выбор:\n"
             f"👶 Возраст: {filters['age']} лет\n"

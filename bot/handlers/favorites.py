@@ -49,19 +49,12 @@ async def favorite_add(callback: types.CallbackQuery):
         f"{activity['full_description']}\n\n"
         f"{summary}")
 
-    row1 = [
-        InlineKeyboardButton(text="Убрать из любимых ✖️",
-                             callback_data=f"remove_fav:{activity_id}"),
-        InlineKeyboardButton(text="Покажи еще идею",
-                             callback_data="activity_next")
-    ]
-    row2 = [
-        InlineKeyboardButton(text="Хочу другие советы",
-                             callback_data="update_filters"),
-        InlineKeyboardButton(text="Поделиться идеей 💌",
-                             callback_data=f"share_activity:{activity_id}")
-    ]
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[row1, row2])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Убрать из любимых ✖️", callback_data=f"remove_fav:{activity_id}")],
+        [InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")],
+        [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")],
+        [InlineKeyboardButton(text="Поделиться идеей 💌", callback_data=f"share_activity:{activity_id}")]
+    ])
 
     try:
         await callback.message.edit_caption(caption=text,
