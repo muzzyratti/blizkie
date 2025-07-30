@@ -40,11 +40,11 @@ energy_keyboard = InlineKeyboardMarkup(inline_keyboard=[
     ],
 ])
 
-place_keyboard = InlineKeyboardMarkup(
+location_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [
-            InlineKeyboardButton(text="Дома", callback_data="place_home"),
-            InlineKeyboardButton(text="На улице", callback_data="place_outside"),
+            InlineKeyboardButton(text="Дома", callback_data="location_home"),
+            InlineKeyboardButton(text="На улице", callback_data="location_outside"),
         ]
     ]
 )

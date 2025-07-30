@@ -3,8 +3,8 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from handlers.user_state import user_data
-from keyboards.onboarding import age_keyboard, time_keyboard, energy_keyboard, place_keyboard
-from db.supabase_client import TIME_MAP, ENERGY_MAP, PLACE_MAP
+from keyboards.onboarding import age_keyboard, time_keyboard, energy_keyboard, location_keyboard
+from db.supabase_client import TIME_MAP, ENERGY_MAP, location_MAP
 from db.supabase_client import supabase
 
 from utils.amplitude_logger import log_event
@@ -48,13 +48,13 @@ async def show_update_options(event: types.Message | types.CallbackQuery):
 
     time_label = TIME_MAP.get(filters["time"], filters["time"])
     energy_label = ENERGY_MAP.get(filters["energy"], filters["energy"])
-    place_label = PLACE_MAP.get(filters["location"], filters["location"])
+    location_label = location_MAP.get(filters["location"], filters["location"])
 
     text = (f"Ваш текущий выбор:\n"
             f"👶 Возраст: {filters['age']} лет\n"
             f"⏳ Время: {time_label}\n"
             f"⚡️ Энергия: {energy_label}\n"
-            f"📍 Место: {place_label}\n\n"
+            f"📍 Место: {location_label}\n\n"
             f"Хотите что-то поменять?")
 
     keyboard = InlineKeyboardMarkup(
@@ -73,7 +73,7 @@ async def show_update_options(event: types.Message | types.CallbackQuery):
                          ],
                          [
                              InlineKeyboardButton(text="Место",
-                                                  callback_data="update_place")
+                                                  callback_data="update_location")
                          ]])
 
     if isinstance(event, types.CallbackQuery):
@@ -107,9 +107,9 @@ async def update_energy(callback: types.CallbackQuery):
     await callback.answer()
 
 
-@update_filters_router.callback_query(F.data == "update_place")
-async def update_place(callback: types.CallbackQuery):
+@update_filters_router.callback_query(F.data == "update_location")
+async def update_location(callback: types.CallbackQuery):
     user_data[callback.from_user.id]["mode"] = "update"
     await callback.message.answer("Где будете играть?",
-                                  reply_markup=place_keyboard)
+                                  reply_markup=location_keyboard)
     await callback.answer()

@@ -1,7 +1,7 @@
 from aiogram import Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command, CommandObject
-from db.supabase_client import get_activity, supabase, TIME_MAP, ENERGY_MAP, PLACE_MAP
+from db.supabase_client import get_activity, supabase, TIME_MAP, ENERGY_MAP, location_MAP
 from utils.amplitude_logger import log_event
 from .user_state import user_data
 import os
@@ -24,7 +24,7 @@ async def send_activity(callback: types.CallbackQuery):
         age=int(filters["age"]),
         time=filters["time"],
         energy=filters["energy"],
-        place=filters["place"])
+        location=filters["location"])
 
     activity = get_activity_by_id(activity_id)
 
@@ -61,7 +61,7 @@ async def send_activity(callback: types.CallbackQuery):
                   "age": filters["age"],
                   "time": filters["time"],
                   "energy": filters["energy"],
-                  "location": filters["place"]
+                  "location": filters["location"]
               },
               session_id=user_data.get(callback.from_user.id,
                                        {}).get("session_id"))
@@ -83,8 +83,8 @@ async def send_activity(callback: types.CallbackQuery):
         filters["time"],
         "energy":
         filters["energy"],
-        "place":
-        filters["place"],
+        "location":
+        filters["location"],
         "seen_at":
         datetime.now().isoformat()
     }).execute()
@@ -186,7 +186,7 @@ async def show_next_activity(callback: types.CallbackQuery):
         age=int(filters["age"]),
         time=filters["time"],
         energy=filters["energy"],
-        place=filters["location"])
+        location=filters["location"])
 
     activity = get_activity_by_id(activity_id)
 
@@ -255,7 +255,7 @@ async def show_next_activity(callback: types.CallbackQuery):
         filters["time"],
         "energy":
         filters["energy"],
-        "place":
+        "location":
         filters["location"],
         "seen_at":
         datetime.now().isoformat()
@@ -283,7 +283,7 @@ async def next_command_handler(message: types.Message):
         age=int(filters["age"]),
         time=filters["time"],
         energy=filters["energy"],
-        place=filters["location"])
+        location=filters["location"])
 
     activity = get_activity_by_id(activity_id)
 
@@ -328,7 +328,7 @@ async def next_command_handler(message: types.Message):
         filters["time"],
         "energy":
         filters["energy"],
-        "place":
+        "location":
         filters["location"],
         "seen_at":
         datetime.now().isoformat()

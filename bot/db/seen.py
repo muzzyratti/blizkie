@@ -3,7 +3,7 @@ from db.supabase_client import supabase
 
 
 def get_next_activity_with_filters(user_id: int, age: int, time: str,
-                                   energy: str, place: str):
+                                   energy: str, location: str):
     # 1. Получаем все подходящие активности
     activities = supabase.table("activities") \
         .select("id") \
@@ -19,7 +19,7 @@ def get_next_activity_with_filters(user_id: int, age: int, time: str,
         .eq("age", age) \
         .eq("time", time) \
         .eq("energy", energy) \
-        .eq("place", place) \
+        .eq("location", location) \
         .execute().data
 
     seen_ids = [s["activity_id"] for s in seen]
@@ -38,7 +38,7 @@ def get_next_activity_with_filters(user_id: int, age: int, time: str,
             .eq("age", age) \
             .eq("time", time) \
             .eq("energy", energy) \
-            .eq("place", place) \
+            .eq("location", location) \
             .execute()
 
         from random import choice

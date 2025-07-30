@@ -1,5 +1,5 @@
 from aiogram import Router, types, F
-from keyboards.onboarding import age_keyboard, time_keyboard, energy_keyboard, place_keyboard
+from keyboards.onboarding import age_keyboard, time_keyboard, energy_keyboard, location_keyboard
 from utils.amplitude_logger import log_event, set_user_properties
 from .user_state import user_data
 from .activities import send_activity, show_next_activity
@@ -82,7 +82,7 @@ async def process_energy(callback: types.CallbackQuery):
   mode = user_data[user_id].get("mode")
   if mode == "onboarding":
     await callback.message.answer("Где будете проводить время?",
-                                  reply_markup=place_keyboard)
+                                  reply_markup=location_keyboard)
   elif mode == "update":
     await callback.message.answer("Энергия обновлена. Вот идея для вас 👇")
     await show_next_activity(callback)
@@ -93,14 +93,14 @@ async def process_energy(callback: types.CallbackQuery):
   await callback.answer()
 
 
-@onboarding_router.callback_query(F.data.startswith("place_"))
-async def process_place(callback: types.CallbackQuery):
-  place_choice = callback.data.split("_")[1]
+@onboarding_router.callback_query(F.data.startswith("location_"))
+async def process_location(callback: types.CallbackQuery):
+  location_choice = callback.data.split("_")[1]
   user_id = callback.from_user.id
-  user_data[user_id]["place"] = place_choice
+  user_data[user_id]["location"] = location_choice
 
-  log_event(user_id, "set_place", {"place": place_choice})
-  set_user_properties(user_id, {"place": place_choice})
+  log_event(user_id, "set_location", {"location": location_choice})
+  set_user_properties(user_id, {"location": location_choice})
 
   mode = user_data[user_id].get("mode")
   if mode == "onboarding":
@@ -116,7 +116,7 @@ async def process_place(callback: types.CallbackQuery):
         "energy":
         user_data[user_id]["energy"],
         "location":
-        user_data[user_id]["place"]
+        user_data[user_id]["location"]
     }).execute()
 
     await send_activity(callback)
@@ -124,7 +124,7 @@ async def process_place(callback: types.CallbackQuery):
     await callback.message.answer("Место обновлено. Вот идея для вас 👇")
     await show_next_activity(callback)
     supabase.table("user_filters").update({
-        "location": place_choice
+        "location": location_choice
     }).eq("user_id", user_id).execute()
 
   await callback.answer()
@@ -149,7 +149,7 @@ async def continue_with_saved_filters(callback: types.CallbackQuery):
       "age": filters["age"],
       "time": filters["time"],
       "energy": filters["energy"],
-      "place": filters["location"],
+      "location": filters["location"],
       "mode": "onboarding"
   }
 

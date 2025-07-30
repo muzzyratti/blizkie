@@ -23,7 +23,7 @@ TIME_MAP = {
     "more": "Более часа"
 }
 
-PLACE_MAP = {
+location_MAP = {
     "home": "Дома",
     "outside": "На улице"
 }

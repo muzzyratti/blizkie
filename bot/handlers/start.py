@@ -2,7 +2,7 @@ from aiogram import Router, types
 from aiogram.filters import CommandStart
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from keyboards.common import start_inline_keyboard
-from db.supabase_client import supabase, ENERGY_MAP, TIME_MAP, PLACE_MAP
+from db.supabase_client import supabase, ENERGY_MAP, TIME_MAP, location_MAP
 from utils.amplitude_logger import log_event
 from handlers.user_state import user_data
 
@@ -27,7 +27,7 @@ async def cmd_start(message: types.Message):
                     time_label = TIME_MAP.get(filters["time"], filters["time"])
                     energy_label = ENERGY_MAP.get(filters["energy"],
                                                   filters["energy"])
-                    place_label = PLACE_MAP.get(filters.get("location"),
+                    location_label = location_MAP.get(filters.get("location"),
                                                 filters.get("location", "не указано"))
 
                     text = (
@@ -36,7 +36,7 @@ async def cmd_start(message: types.Message):
                         f"👶 Возраст: {filters['age']} лет\n"
                         f"⏳ Время: {time_label}\n"
                         f"⚡️ Энергия: {energy_label}\n"
-                        f"📍 Место: {place_label}\n\n"
+                        f"📍 Место: {location_label}\n\n"
                         "Хотите продолжить с этими фильтрами или выбрать заново?"
                     )
 
