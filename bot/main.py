@@ -18,14 +18,13 @@ logger = setup_logger()
 
 async def set_bot_commands(bot):
     commands = [
-        BotCommand(command="start", description="Начать заново"),
-        BotCommand(command="next", description="Показать ещё идею"),
-        BotCommand(command="favorites", description="Мои любимые"),
-        BotCommand(command="update_filters", description="Хочу другие фильтры"),
-        BotCommand(command="feedback",
-                   description="🧸 Поделитесь мнением или ошибкой в боте"),
-        BotCommand(command="subscribe", description="📢 Подпишитесь на канал"),
-        BotCommand(command="donate", description="Поддержать проект 💛"),
+        BotCommand(command="start", description="🚀 Начать заново"),
+        BotCommand(command="next", description="🎲 Показать ещё идею"),
+        BotCommand(command="favorites", description="❤️ Мои любимые идеи"),
+        BotCommand(command="update_filters", description="🎛️ Хочу другие фильтры"),
+        BotCommand(command="feedback", description="🧸 Поделиться мнением или ошибкой"),
+        BotCommand(command="subscribe", description="📢 Подписаться на канал"),
+        BotCommand(command="donate", description="💛 Поддержать проект"),
     ]
     await bot.set_my_commands(commands)
 

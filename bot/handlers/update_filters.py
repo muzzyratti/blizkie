@@ -59,20 +59,20 @@ async def show_update_options(event: types.Message | types.CallbackQuery):
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[[
-            InlineKeyboardButton(text="Поменять возраст",
+            InlineKeyboardButton(text="Возраст",
                                  callback_data="update_age")
         ],
                          [
-                             InlineKeyboardButton(text="Поменять время",
+                             InlineKeyboardButton(text="Время на игру",
                                                   callback_data="update_time")
                          ],
                          [
                              InlineKeyboardButton(
-                                 text="Поменять энергию",
+                                 text="Уровень энергии",
                                  callback_data="update_energy")
                          ],
                          [
-                             InlineKeyboardButton(text="Поменять место",
+                             InlineKeyboardButton(text="Место",
                                                   callback_data="update_place")
                          ]])
 
