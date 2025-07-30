@@ -5,16 +5,28 @@ from db.supabase_client import get_activity, supabase, TIME_MAP, ENERGY_MAP, PLA
 from utils.amplitude_logger import log_event
 from .user_state import user_data
 import os
+from db.seen import get_next_activity_with_filters
+from datetime import datetime
 
 activities_router = Router()
 
 
+def get_activity_by_id(activity_id: int):
+    response = supabase.table("activities").select("*").eq(
+        "id", activity_id).single().execute()
+    return response.data
+
+
 async def send_activity(callback: types.CallbackQuery):
     filters = user_data[callback.from_user.id]
-    activity = get_activity(age=int(filters["age"]),
-                            time_required=TIME_MAP[filters["time"]],
-                            energy=ENERGY_MAP[filters["energy"]],
-                            location=PLACE_MAP[filters["place"]])
+    activity_id, was_reset = get_next_activity_with_filters(
+        user_id=callback.from_user.id,
+        age=int(filters["age"]),
+        time=filters["time"],
+        energy=filters["energy"],
+        place=filters["place"])
+
+    activity = get_activity_by_id(activity_id)
 
     if not activity:
         await callback.message.answer(
@@ -58,6 +70,24 @@ async def send_activity(callback: types.CallbackQuery):
                                         caption=text,
                                         parse_mode="Markdown",
                                         reply_markup=keyboard)
+
+    # Записываем просмотр
+    supabase.table("seen_activities").upsert({
+        "user_id":
+        callback.from_user.id,
+        "activity_id":
+        activity["id"],
+        "age":
+        filters["age"],
+        "time":
+        filters["time"],
+        "energy":
+        filters["energy"],
+        "place":
+        filters["place"],
+        "seen_at":
+        datetime.now().isoformat()
+    }).execute()
 
 
 @activities_router.callback_query(F.data.startswith("activity_details:"))
@@ -135,16 +165,21 @@ async def show_activity_details(callback: types.CallbackQuery):
 
 @activities_router.callback_query(F.data == "activity_next")
 async def show_next_activity(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
     filters = user_data.get(callback.from_user.id)
     if not filters:
         await callback.message.answer("Сначала пройдите подбор заново: /start")
         await callback.answer()
         return
 
-    activity = get_activity(age=int(filters["age"]),
-                            time_required=TIME_MAP[filters["time"]],
-                            energy=ENERGY_MAP[filters["energy"]],
-                            location=PLACE_MAP[filters["place"]])
+    activity_id, was_reset = get_next_activity_with_filters(
+        user_id=user_id,
+        age=int(filters["age"]),
+        time=filters["time"],
+        energy=filters["energy"],
+        place=filters["place"])
+
+    activity = get_activity_by_id(activity_id)
 
     if not activity:
         await callback.message.answer("😔 Больше идей нет для этих условий.")
@@ -172,7 +207,8 @@ async def show_next_activity(callback: types.CallbackQuery):
         ]
     ])
 
-    log_event(user_id=callback.from_user.id,
+    # ✅ Логирование
+    log_event(user_id=user_id,
               event_name="show_activity_L0",
               event_properties={
                   "activity_id": activity["id"],
@@ -181,10 +217,9 @@ async def show_next_activity(callback: types.CallbackQuery):
                   "energy": filters["energy"],
                   "location": filters["place"]
               },
-              session_id=user_data.get(callback.from_user.id,
-                                       {}).get("session_id"))
+              session_id=filters.get("session_id"))
 
-    log_event(user_id=callback.from_user.id,
+    log_event(user_id=user_id,
               event_name="show_next_activity",
               event_properties={
                   "activity_id": activity["id"],
@@ -193,13 +228,23 @@ async def show_next_activity(callback: types.CallbackQuery):
                   "energy": filters["energy"],
                   "location": filters["place"]
               },
-              session_id=user_data.get(callback.from_user.id,
-                                       {}).get("session_id"))
+              session_id=filters.get("session_id"))
 
     await callback.message.answer_photo(photo=activity["image_url"],
                                         caption=text,
                                         parse_mode="Markdown",
                                         reply_markup=keyboard)
+
+    supabase.table("seen_activities").upsert({
+        "user_id": user_id,
+        "activity_id": activity["id"],
+        "age": filters["age"],
+        "time": filters["time"],
+        "energy": filters["energy"],
+        "place": filters["place"],
+        "seen_at": datetime.now().isoformat()
+    }).execute()
+    
     await callback.answer()
 
 
@@ -212,10 +257,14 @@ async def next_command_handler(message: types.Message):
         await message.answer("Сначала пройдите подбор заново: /start")
         return
 
-    activity = get_activity(age=int(filters["age"]),
-                            time_required=TIME_MAP[filters["time"]],
-                            energy=ENERGY_MAP[filters["energy"]],
-                            location=PLACE_MAP[filters["place"]])
+    activity_id, was_reset = get_next_activity_with_filters(
+        user_id=user_id,
+        age=int(filters["age"]),
+        time=filters["time"],
+        energy=filters["energy"],
+        place=filters["place"])
+
+    activity = get_activity_by_id(activity_id)
 
     if not activity:
         await message.answer("😔 Больше идей нет для этих условий.")
@@ -227,12 +276,19 @@ async def next_command_handler(message: types.Message):
             f"📦 Материалы: {activity['materials'] or 'Не требуются'}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Расскажи как играть",
-                              callback_data=f"activity_details:{activity['id']}")],
-        [InlineKeyboardButton(text="Покажи еще идею",
-                              callback_data="activity_next")],
-        [InlineKeyboardButton(text="Хочу другие фильтры",
-                              callback_data="update_filters")]
+        [
+            InlineKeyboardButton(
+                text="Расскажи как играть",
+                callback_data=f"activity_details:{activity['id']}")
+        ],
+        [
+            InlineKeyboardButton(text="Покажи еще идею",
+                                 callback_data="activity_next")
+        ],
+        [
+            InlineKeyboardButton(text="Хочу другие фильтры",
+                                 callback_data="update_filters")
+        ]
     ])
 
     await message.answer_photo(photo=activity["image_url"],
@@ -240,6 +296,16 @@ async def next_command_handler(message: types.Message):
                                parse_mode="Markdown",
                                reply_markup=keyboard)
 
+    supabase.table("seen_activities").upsert({
+        "user_id": user_id,
+        "activity_id": activity["id"],
+        "age": filters["age"],
+        "time": filters["time"],
+        "energy": filters["energy"],
+        "place": filters["place"],
+        "seen_at": datetime.now().isoformat()
+    }).execute()
+    
     log_event(user_id=user_id,
               event_name="show_next_activity",
               event_properties={
@@ -266,7 +332,8 @@ async def show_activity_by_id(message: types.Message, command: CommandObject):
 
     activity_id = int(activity_id_str)
 
-    response = supabase.table("activities").select("*").eq("id", activity_id).execute()
+    response = supabase.table("activities").select("*").eq(
+        "id", activity_id).execute()
     if not response.data:
         await message.answer("😔 Не удалось найти активность.")
         return
@@ -281,27 +348,31 @@ async def show_activity_by_id(message: types.Message, command: CommandObject):
         f"📍 {activity.get('location', 'не указано')}\n\n"
         f"📦 Материалы: {activity.get('materials') or 'Не требуются'}\n\n"
         f"{activity.get('full_description', '')}\n\n"
-        f"{summary}"
-    )
+        f"{summary}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Добавить в любимые ❤️", callback_data=f"favorite_add:{activity_id}"),
-            InlineKeyboardButton(text="Показать ещё", callback_data="activity_next")
+            InlineKeyboardButton(text="Добавить в любимые ❤️",
+                                 callback_data=f"favorite_add:{activity_id}"),
+            InlineKeyboardButton(text="Показать ещё",
+                                 callback_data="activity_next")
         ],
         [
-            InlineKeyboardButton(text="Поделиться 💌", callback_data=f"share_activity:{activity_id}"),
-            InlineKeyboardButton(text="Другие фильтры", callback_data="update_filters")
+            InlineKeyboardButton(
+                text="Поделиться 💌",
+                callback_data=f"share_activity:{activity_id}"),
+            InlineKeyboardButton(text="Другие фильтры",
+                                 callback_data="update_filters")
         ]
     ])
 
     try:
-        await message.answer_photo(
-            photo=activity["image_url"],
-            caption=caption[:1024],
-            parse_mode="Markdown"
-        )
-        await message.answer(full_text, parse_mode="Markdown", reply_markup=keyboard)
+        await message.answer_photo(photo=activity["image_url"],
+                                   caption=caption[:1024],
+                                   parse_mode="Markdown")
+        await message.answer(full_text,
+                             parse_mode="Markdown",
+                             reply_markup=keyboard)
     except Exception as e:
         await message.answer("⚠️ Ошибка при отправке активности.")
         print("Ошибка в show_activity_by_id:", e)
@@ -316,6 +387,7 @@ async def show_activity_by_id(message: types.Message, command: CommandObject):
                       "energy": activity.get("energy"),
                       "location": activity.get("location")
                   },
-                  session_id=user_data.get(message.from_user.id, {}).get("session_id"))
+                  session_id=user_data.get(message.from_user.id,
+                                           {}).get("session_id"))
     except Exception as e:
         print(f"[Amplitude] Failed to log show_activity_by_id: {e}")
