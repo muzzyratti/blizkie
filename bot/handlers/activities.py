@@ -99,11 +99,9 @@ async def show_activity_details(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     activity_id = int(callback.data.split(":")[1])
 
-    response = supabase.table("activities").select("*").eq(
-        "id", activity_id).execute()
+    response = supabase.table("activities").select("*").eq("id", activity_id).execute()
     if not response.data:
-        await callback.message.answer(
-            "😔 Не удалось найти подробности активности.")
+        await callback.message.answer("😔 Не удалось найти подробности активности.")
         await callback.answer()
         return
 
@@ -117,36 +115,57 @@ async def show_activity_details(callback: types.CallbackQuery):
 
     is_favorite = len(fav_response.data) > 0
 
-    summary = "\n".join([f"💡 {s}" for s in (activity['summary'] or [])])
+    summary = "\n".join([f"💡 {s}" for s in (activity.get("summary") or [])])
+
+    caption = f"🎲 *{activity['title']}*"
     text = (
-        f"🎲 *{activity['title']}*\n\n"
         f"⏱️ {activity['time_required']} • ⚡️ {activity['energy']} • 📍 {activity['location']}\n\n"
         f"Материалы: {activity['materials'] or 'Не требуются'}\n\n"
         f"{activity['full_description']}\n\n"
-        f"{summary}")
+        f"{summary}"
+    )
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
                 text="Добавить в любимые ❤️"
                 if not is_favorite else "Убрать из любимых ✖️",
-                callback_data=
-                f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}"
+                callback_data=f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}"
             )
         ],
         [
-            InlineKeyboardButton(text="Покажи еще идею",
-                                 callback_data="activity_next")
+            InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")
         ],
         [
-            InlineKeyboardButton(text="Хочу другие фильтры",
-                                 callback_data="update_filters")
+            InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")
         ],
         [
-            InlineKeyboardButton(text="Поделиться идеей 💌",
-                                 callback_data=f"share_activity:{activity_id}")
+            InlineKeyboardButton(text="Поделиться идеей 💌", callback_data=f"share_activity:{activity_id}")
         ]
     ])
+
+    try:
+        if len(caption) + len(text) <= 1024:
+            await callback.message.answer_photo(
+                photo=activity["image_url"],
+                caption=f"{caption}\n\n{text}",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        else:
+            await callback.message.answer_photo(
+                photo=activity["image_url"],
+                caption=caption[:1024],
+                parse_mode="Markdown"
+            )
+            await callback.message.answer(
+                text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+    except Exception as e:
+        await callback.message.answer("⚠️ Не удалось отобразить идею.")
+        print("Ошибка при отправке подробностей:", e)
 
     log_event(user_id=callback.from_user.id,
               event_name="show_activity_L1",
@@ -157,13 +176,8 @@ async def show_activity_details(callback: types.CallbackQuery):
                   "energy": activity.get("energy"),
                   "location": activity.get("location")
               },
-              session_id=user_data.get(callback.from_user.id,
-                                       {}).get("session_id"))
+              session_id=user_data.get(callback.from_user.id, {}).get("session_id"))
 
-    await callback.message.answer_photo(photo=activity["image_url"],
-                                        caption=text,
-                                        parse_mode="Markdown",
-                                        reply_markup=keyboard)
     await callback.answer()
 
 
