@@ -50,10 +50,22 @@ async def favorite_add(callback: types.CallbackQuery):
         f"{summary}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Убрать из любимых ✖️", callback_data=f"remove_fav:{activity_id}")],
-        [InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")],
-        [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")],
-        [InlineKeyboardButton(text="Поделиться идеей 💌", callback_data=f"share_activity:{activity_id}")]
+        [
+            InlineKeyboardButton(text="Убрать из любимых ✖️",
+                                 callback_data=f"remove_fav:{activity_id}")
+        ],
+        [
+            InlineKeyboardButton(text="Покажи еще идею",
+                                 callback_data="activity_next")
+        ],
+        [
+            InlineKeyboardButton(text="Хочу другие фильтры",
+                                 callback_data="update_filters")
+        ],
+        [
+            InlineKeyboardButton(text="Поделиться идеей 💌",
+                                 callback_data=f"share_activity:{activity_id}")
+        ]
     ])
 
     try:
@@ -61,10 +73,17 @@ async def favorite_add(callback: types.CallbackQuery):
                                             parse_mode="Markdown",
                                             reply_markup=keyboard)
     except Exception:
-        await callback.message.answer_photo(photo=activity["image_url"],
-                                            caption=text,
-                                            parse_mode="Markdown",
-                                            reply_markup=keyboard)
+        image_url = activity.get("image_url")
+
+        if image_url and image_url.strip():
+            await callback.message.answer_photo(photo=image_url,
+                                                caption=text,
+                                                parse_mode="Markdown",
+                                                reply_markup=keyboard)
+        else:
+            await callback.message.answer(text,
+                                          parse_mode="Markdown",
+                                          reply_markup=keyboard)
 
     await callback.answer("Добавлено в любимые ❤️")
 

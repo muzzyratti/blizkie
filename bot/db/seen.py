@@ -16,20 +16,23 @@ def get_next_activity_with_filters(user_id: int, age: int, time: str,
     mapped_time = TIME_MAP.get(time, time)
 
     activities = supabase.table("activities") \
-        .select("id") \
-        .eq("age_min", age) \
-        .eq("time_required", mapped_time) \
-        .eq("energy", mapped_energy) \
-        .eq("location", mapped_location) \
-        .execute().data
+    .select("id") \
+    .lte("age_min", age) \
+    .gte("age_max", age) \
+    .eq("time_required", mapped_time) \
+    .eq("energy", mapped_energy) \
+    .eq("location", mapped_location) \
+    .execute().data
 
     all_ids = [a["id"] for a in activities]
     logging.info(f"[📦 all_ids] найдено {len(all_ids)} активностей")
-    
+
     if not all_ids:
-        logging.warning("[❌ empty] Нет подходящих активностей в базе по выбранным фильтрам")
+        logging.warning(
+            "[❌ empty] Нет подходящих активностей в базе по выбранным фильтрам"
+        )
         return None, False
-    
+
     # 2. Получаем просмотренные
     seen = supabase.table("seen_activities") \
         .select("activity_id") \

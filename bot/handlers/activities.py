@@ -27,9 +27,10 @@ async def send_activity(callback: types.CallbackQuery):
         location=filters["location"])
 
     if activity_id is None:
-        await callback.message.answer("😔 Нет идей для таких условий, попробуйте изменить фильтры.")
+        await callback.message.answer(
+            "😔 Нет идей для таких условий, попробуйте изменить фильтры.")
         return
-    
+
     activity = get_activity_by_id(activity_id)
 
     if not activity:
@@ -70,10 +71,17 @@ async def send_activity(callback: types.CallbackQuery):
               session_id=user_data.get(callback.from_user.id,
                                        {}).get("session_id"))
 
-    await callback.message.answer_photo(photo=activity["image_url"],
-                                        caption=text,
-                                        parse_mode="Markdown",
-                                        reply_markup=keyboard)
+    image_url = activity.get("image_url")
+
+    if image_url and image_url.strip():
+        await callback.message.answer_photo(photo=image_url,
+                                            caption=text,
+                                            parse_mode="Markdown",
+                                            reply_markup=keyboard)
+    else:
+        await callback.message.answer(text,
+                                      parse_mode="Markdown",
+                                      reply_markup=keyboard)
 
     # Записываем просмотр
     supabase.table("seen_activities").upsert({
@@ -99,9 +107,11 @@ async def show_activity_details(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     activity_id = int(callback.data.split(":")[1])
 
-    response = supabase.table("activities").select("*").eq("id", activity_id).execute()
+    response = supabase.table("activities").select("*").eq(
+        "id", activity_id).execute()
     if not response.data:
-        await callback.message.answer("😔 Не удалось найти подробности активности.")
+        await callback.message.answer(
+            "😔 Не удалось найти подробности активности.")
         await callback.answer()
         return
 
@@ -122,47 +132,53 @@ async def show_activity_details(callback: types.CallbackQuery):
         f"⏱️ {activity['time_required']} • ⚡️ {activity['energy']} • 📍 {activity['location']}\n\n"
         f"Материалы: {activity['materials'] or 'Не требуются'}\n\n"
         f"{activity['full_description']}\n\n"
-        f"{summary}"
-    )
+        f"{summary}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
                 text="Добавить в любимые ❤️"
                 if not is_favorite else "Убрать из любимых ✖️",
-                callback_data=f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}"
+                callback_data=
+                f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}"
             )
         ],
         [
-            InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")
+            InlineKeyboardButton(text="Покажи еще идею",
+                                 callback_data="activity_next")
         ],
         [
-            InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")
+            InlineKeyboardButton(text="Хочу другие фильтры",
+                                 callback_data="update_filters")
         ],
         [
-            InlineKeyboardButton(text="Поделиться идеей 💌", callback_data=f"share_activity:{activity_id}")
+            InlineKeyboardButton(text="Поделиться идеей 💌",
+                                 callback_data=f"share_activity:{activity_id}")
         ]
     ])
 
     try:
-        if len(caption) + len(text) <= 1024:
-            await callback.message.answer_photo(
-                photo=activity["image_url"],
-                caption=f"{caption}\n\n{text}",
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
+        image_url = activity.get("image_url")
+
+        if image_url and image_url.strip():
+            if len(caption) + len(text) <= 1024:
+                await callback.message.answer_photo(
+                    photo=image_url,
+                    caption=f"{caption}\n\n{text}",
+                    parse_mode="Markdown",
+                    reply_markup=keyboard)
+            else:
+                await callback.message.answer_photo(photo=image_url,
+                                                    caption=caption[:1024],
+                                                    parse_mode="Markdown")
+                await callback.message.answer(text,
+                                              parse_mode="Markdown",
+                                              reply_markup=keyboard)
         else:
-            await callback.message.answer_photo(
-                photo=activity["image_url"],
-                caption=caption[:1024],
-                parse_mode="Markdown"
-            )
-            await callback.message.answer(
-                text,
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
+            # нет картинки — шлём просто текст
+            await callback.message.answer(f"{caption}\n\n{text}",
+                                          parse_mode="Markdown",
+                                          reply_markup=keyboard)
     except Exception as e:
         await callback.message.answer("⚠️ Не удалось отобразить идею.")
         print("Ошибка при отправке подробностей:", e)
@@ -176,7 +192,8 @@ async def show_activity_details(callback: types.CallbackQuery):
                   "energy": activity.get("energy"),
                   "location": activity.get("location")
               },
-              session_id=user_data.get(callback.from_user.id, {}).get("session_id"))
+              session_id=user_data.get(callback.from_user.id,
+                                       {}).get("session_id"))
 
     await callback.answer()
 
@@ -197,7 +214,8 @@ async def show_next_activity(callback: types.CallbackQuery):
             return
 
         filters = response.data[0]
-        user_data[user_id] = filters  # 💾 Сохраняем в память для следующих запросов
+        user_data[
+            user_id] = filters  # 💾 Сохраняем в память для следующих запросов
 
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=user_id,
@@ -207,9 +225,10 @@ async def show_next_activity(callback: types.CallbackQuery):
         location=filters["location"])
 
     if activity_id is None:
-        await callback.message.answer("😔 Нет идей для таких условий, попробуйте изменить фильтры.")
+        await callback.message.answer(
+            "😔 Нет идей для таких условий, попробуйте изменить фильтры.")
         return
-    
+
     activity = get_activity_by_id(activity_id)
 
     if not activity:
@@ -261,10 +280,17 @@ async def show_next_activity(callback: types.CallbackQuery):
               },
               session_id=filters.get("session_id"))
 
-    await callback.message.answer_photo(photo=activity["image_url"],
-                                        caption=text,
-                                        parse_mode="Markdown",
-                                        reply_markup=keyboard)
+    image_url = activity.get("image_url")
+
+    if image_url and image_url.strip():
+        await callback.message.answer_photo(photo=image_url,
+                                            caption=text,
+                                            parse_mode="Markdown",
+                                            reply_markup=keyboard)
+    else:
+        await callback.message.answer(text,
+                                      parse_mode="Markdown",
+                                      reply_markup=keyboard)
 
     supabase.table("seen_activities").upsert({
         "user_id":
@@ -292,7 +318,8 @@ async def next_command_handler(message: types.Message):
     filters = user_data.get(user_id)
 
     if not filters:
-        response = supabase.table("user_filters").select("*").eq("user_id", user_id).execute()
+        response = supabase.table("user_filters").select("*").eq(
+            "user_id", user_id).execute()
         if not response.data:
             await message.answer("Сначала пройдите подбор заново: /start")
             return
@@ -308,9 +335,10 @@ async def next_command_handler(message: types.Message):
         location=filters["location"])
 
     if activity_id is None:
-        await callback.message.answer("😔 Нет идей для таких условий, попробуйте изменить фильтры.")
+        await callback.message.answer(
+            "😔 Нет идей для таких условий, попробуйте изменить фильтры.")
         return
-    
+
     activity = get_activity_by_id(activity_id)
 
     if not activity:
@@ -338,10 +366,17 @@ async def next_command_handler(message: types.Message):
         ]
     ])
 
-    await message.answer_photo(photo=activity["image_url"],
-                               caption=text,
-                               parse_mode="Markdown",
-                               reply_markup=keyboard)
+    image_url = activity.get("image_url")
+
+    if image_url and image_url.strip():
+        await message.answer_photo(photo=image_url,
+                                   caption=text,
+                                   parse_mode="Markdown",
+                                   reply_markup=keyboard)
+    else:
+        await message.answer(text,
+                             parse_mode="Markdown",
+                             reply_markup=keyboard)
 
     supabase.table("seen_activities").upsert({
         "user_id":
@@ -395,7 +430,7 @@ async def show_activity_by_id(message: types.Message, command: CommandObject):
     activity = response.data[0]
 
     summary = "\n".join([f"💡 {s}" for s in (activity.get("summary") or [])])
-    caption = f"🎲 Идея для родителя: *{activity['title']}*"
+    caption = f"🎲 *{activity['title']}*"
     full_text = (
         f"⏱️ {activity.get('time_required', 'не указано')} • "
         f"⚡️ {activity.get('energy', 'не указана')} • "
@@ -421,12 +456,20 @@ async def show_activity_by_id(message: types.Message, command: CommandObject):
     ])
 
     try:
-        await message.answer_photo(photo=activity["image_url"],
-                                   caption=caption[:1024],
-                                   parse_mode="Markdown")
-        await message.answer(full_text,
-                             parse_mode="Markdown",
-                             reply_markup=keyboard)
+        image_url = activity.get("image_url")
+
+        if image_url and image_url.strip():
+            await message.answer_photo(photo=image_url,
+                                       caption=caption[:1024],
+                                       parse_mode="Markdown")
+            await message.answer(full_text,
+                                 parse_mode="Markdown",
+                                 reply_markup=keyboard)
+        else:
+            # нет картинки — шлём всё одним текстом
+            await message.answer(f"{caption}\n\n{full_text}",
+                                 parse_mode="Markdown",
+                                 reply_markup=keyboard)
     except Exception as e:
         await message.answer("⚠️ Ошибка при отправке активности.")
         print("Ошибка в show_activity_by_id:", e)
