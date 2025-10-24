@@ -48,21 +48,48 @@ async def share_activity(callback: types.CallbackQuery):
     try:
         image_url = activity.get("image_url")
 
+        # Собираем полный текст, который человек потом сможет переслать
+        full_message = f"{caption}\n\n{text}"
+
+        # Режем на куски по 3500 символов (ниже лимита 4096 телеги)
+        chunk_size = 3500
+        chunks = [
+            full_message[i:i + chunk_size]
+            for i in range(0, len(full_message), chunk_size)
+        ]
+
         if image_url and image_url.strip():
-            if len(caption) + len(text) <= 1024:
-                await callback.message.answer_photo(
-                    photo=image_url,
-                    caption=f"{caption}\n\n{text}",
-                    parse_mode="Markdown")
-            else:
-                await callback.message.answer_photo(photo=image_url,
-                                                    caption=caption[:1024],
-                                                    parse_mode="Markdown")
-                await callback.message.answer(text, parse_mode="Markdown")
+            # 1) отправляем фото с первой частью (но caption максимум 1024)
+            first_chunk = chunks[0]
+            await callback.message.answer_photo(
+                photo=image_url,
+                caption=first_chunk[:1024],
+                parse_mode="Markdown"
+            )
+
+            # 2) готовим весь оставшийся текст:
+            #    остаток текущего куска после 1024 символов + все остальные куски
+            remaining_parts = []
+            if len(first_chunk) > 1024:
+                remaining_parts.append(first_chunk[1024:])
+            if len(chunks) > 1:
+                remaining_parts.extend(chunks[1:])
+
+            # 3) досылаем остаток сообщениями
+            for part in remaining_parts:
+                # на всякий случай ещё раз режем, если вдруг остаток > 3500 (почти нереально, но на будущее)
+                subchunks = [
+                    part[i:i + chunk_size]
+                    for i in range(0, len(part), chunk_size)
+                ]
+                for sc in subchunks:
+                    await callback.message.answer(sc, parse_mode="Markdown")
+
         else:
-            # нет картинки — шлём просто текст
-            await callback.message.answer(f"{caption}\n\n{text}",
-                                          parse_mode="Markdown")
+            # без картинки — просто шлём кусками весь текст
+            for part in chunks:
+                await callback.message.answer(part, parse_mode="Markdown")
+
     except Exception as e:
         await callback.message.answer("⚠️ Не удалось поделиться идеей.")
         print("Ошибка при отправке идеи:", e)

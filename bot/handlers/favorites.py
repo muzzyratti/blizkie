@@ -69,21 +69,85 @@ async def favorite_add(callback: types.CallbackQuery):
     ])
 
     try:
-        await callback.message.edit_caption(caption=text,
-                                            parse_mode="Markdown",
-                                            reply_markup=keyboard)
+        if len(text) <= 1024:
+            await callback.message.edit_caption(
+                caption=text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        else:
+            raise ValueError("caption too long")
     except Exception:
         image_url = activity.get("image_url")
 
+        # Режем длинный text на куски по ~3500 (ниже лимита телеги в 4096)
+        chunk_size = 3500
+        chunks = [
+            text[i:i + chunk_size]
+            for i in range(0, len(text), chunk_size)
+        ]
+
         if image_url and image_url.strip():
-            await callback.message.answer_photo(photo=image_url,
-                                                caption=text,
-                                                parse_mode="Markdown",
-                                                reply_markup=keyboard)
+            # 1) отправляем фото с первой частью (caption <= 1024)
+            first_chunk = chunks[0]
+            await callback.message.answer_photo(
+                photo=image_url,
+                caption=first_chunk[:1024],
+                parse_mode="Markdown"
+            )
+
+            # 2) собираем всё, что не влезло в caption:
+            #    остаток первого чанка после [:1024] + все остальные чанки
+            remaining_parts = []
+            if len(first_chunk) > 1024:
+                remaining_parts.append(first_chunk[1024:])
+            if len(chunks) > 1:
+                remaining_parts.extend(chunks[1:])
+
+            # 3) шлём оставшийся текст отдельными сообщениями
+            for i, part in enumerate(remaining_parts):
+                # на всякий случай режем part, если вдруг там > chunk_size
+                subchunks = [
+                    part[j:j + chunk_size]
+                    for j in range(0, len(part), chunk_size)
+                ]
+
+                for k, sc in enumerate(subchunks):
+                    is_last_message = (i == len(remaining_parts) - 1) and (k == len(subchunks) - 1)
+
+                    if is_last_message:
+                        await callback.message.answer(
+                            sc,
+                            parse_mode="Markdown",
+                            reply_markup=keyboard
+                        )
+                    else:
+                        await callback.message.answer(
+                            sc,
+                            parse_mode="Markdown"
+                        )
         else:
-            await callback.message.answer(text,
-                                          parse_mode="Markdown",
-                                          reply_markup=keyboard)
+            # без картинки: просто отправляем все части текста и последнему даём клавиатуру
+            for i, part in enumerate(chunks):
+                subchunks = [
+                    part[j:j + chunk_size]
+                    for j in range(0, len(part), chunk_size)
+                ]
+
+                for k, sc in enumerate(subchunks):
+                    is_last_message = (i == len(chunks) - 1) and (k == len(subchunks) - 1)
+
+                    if is_last_message:
+                        await callback.message.answer(
+                            sc,
+                            parse_mode="Markdown",
+                            reply_markup=keyboard
+                        )
+                    else:
+                        await callback.message.answer(
+                            sc,
+                            parse_mode="Markdown"
+                        )
 
     await callback.answer("Добавлено в любимые ❤️")
 

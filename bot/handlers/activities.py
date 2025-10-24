@@ -161,6 +161,7 @@ async def show_activity_details(callback: types.CallbackQuery):
         image_url = activity.get("image_url")
 
         if image_url and image_url.strip():
+            # Проверяем длину caption + текста
             if len(caption) + len(text) <= 1024:
                 await callback.message.answer_photo(
                     photo=image_url,
@@ -168,17 +169,44 @@ async def show_activity_details(callback: types.CallbackQuery):
                     parse_mode="Markdown",
                     reply_markup=keyboard)
             else:
+                # Отправляем фото с коротким заголовком
                 await callback.message.answer_photo(photo=image_url,
                                                     caption=caption[:1024],
                                                     parse_mode="Markdown")
-                await callback.message.answer(text,
-                                              parse_mode="Markdown",
-                                              reply_markup=keyboard)
+
+                # Разбиваем длинный текст на части по 3500 символов
+                chunk_size = 3500
+                chunks = [
+                    text[i:i + chunk_size]
+                    for i in range(0, len(text), chunk_size)
+                ]
+
+                # Отправляем все части по очереди
+                for i, chunk in enumerate(chunks):
+                    if i < len(chunks) - 1:
+                        await callback.message.answer(chunk,
+                                                      parse_mode="Markdown")
+                    else:
+                        # в последнем сообщении добавляем клавиатуру
+                        await callback.message.answer(chunk,
+                                                      parse_mode="Markdown",
+                                                      reply_markup=keyboard)
         else:
-            # нет картинки — шлём просто текст
-            await callback.message.answer(f"{caption}\n\n{text}",
-                                          parse_mode="Markdown",
-                                          reply_markup=keyboard)
+            # без картинки
+            long_text = f"{caption}\n\n{text}"
+            chunk_size = 3500
+            chunks = [
+                long_text[i:i + chunk_size]
+                for i in range(0, len(long_text), chunk_size)
+            ]
+
+            for i, chunk in enumerate(chunks):
+                if i < len(chunks) - 1:
+                    await callback.message.answer(chunk, parse_mode="Markdown")
+                else:
+                    await callback.message.answer(chunk,
+                                                  parse_mode="Markdown",
+                                                  reply_markup=keyboard)
     except Exception as e:
         await callback.message.answer("⚠️ Не удалось отобразить идею.")
         print("Ошибка при отправке подробностей:", e)
@@ -458,18 +486,41 @@ async def show_activity_by_id(message: types.Message, command: CommandObject):
     try:
         image_url = activity.get("image_url")
 
+        # Готовим один большой текст: заголовок + контент
+        full_message = f"{caption}\n\n{full_text}"
+
+        # Режем на куски по ~3500 символов
+        chunk_size = 3500
+        chunks = [
+            full_message[i:i + chunk_size]
+            for i in range(0, len(full_message), chunk_size)
+        ]
+
         if image_url and image_url.strip():
+            # Отправляем фото с первой частью
             await message.answer_photo(photo=image_url,
-                                       caption=caption[:1024],
+                                       caption=chunks[0][:1024],
                                        parse_mode="Markdown")
-            await message.answer(full_text,
-                                 parse_mode="Markdown",
-                                 reply_markup=keyboard)
+
+            # Остальные куски текстом
+            for i, chunk in enumerate(chunks[1:], start=1):
+                if i < len(chunks) - 1:
+                    await message.answer(chunk, parse_mode="Markdown")
+                else:
+                    # последний кусок — уже с клавиатурой
+                    await message.answer(chunk,
+                                         parse_mode="Markdown",
+                                         reply_markup=keyboard)
         else:
-            # нет картинки — шлём всё одним текстом
-            await message.answer(f"{caption}\n\n{full_text}",
-                                 parse_mode="Markdown",
-                                 reply_markup=keyboard)
+            # Без картинки — просто шлём кусками
+            for i, chunk in enumerate(chunks):
+                if i < len(chunks) - 1:
+                    await message.answer(chunk, parse_mode="Markdown")
+                else:
+                    await message.answer(chunk,
+                                         parse_mode="Markdown",
+                                         reply_markup=keyboard)
+
     except Exception as e:
         await message.answer("⚠️ Ошибка при отправке активности.")
         print("Ошибка в show_activity_by_id:", e)
