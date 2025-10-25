@@ -89,3 +89,27 @@ def get_favorites(user_id: int):
     # Сортируем в том порядке, как в избранном
     activities_map = {a["id"]: a for a in activities.data}
     return [activities_map[i] for i in activity_ids if i in activities_map]
+
+def get_all_activities(age: int, time_required: str, energy: str, location: str):
+    """Возвращает ВСЕ активности, подходящие под фильтры (учитывает множества значений)."""
+    from db.seen import _matches_multivalue
+    logging.info(
+        f"[TEST] Проверяем все активности: age={age}, time={time_required}, energy={energy}, location={location}"
+    )
+
+    response = supabase.table("activities").select("*").execute()
+    activities = response.data
+    logging.info(f"[TEST] Всего активностей в БД: {len(activities)}")
+
+    filtered = [
+        a for a in activities
+        if a.get("age_min") is not None
+        and a.get("age_max") is not None
+        and int(a["age_min"]) <= age <= int(a["age_max"])
+        and _matches_multivalue(a.get("time_required"), time_required)
+        and _matches_multivalue(a.get("energy"), energy)
+        and _matches_multivalue(a.get("location"), location)
+    ]
+
+    logging.info(f"[TEST] Подходящих активностей: {len(filtered)}")
+    return filtered

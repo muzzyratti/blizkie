@@ -17,25 +17,29 @@ def get_activity_by_id(activity_id: int):
     return response.data
 
 
+# --- L0 карточка (короткая)
 async def send_activity(callback: types.CallbackQuery):
     filters = user_data[callback.from_user.id]
+
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=callback.from_user.id,
-        age=int(filters["age"]),
-        time=filters["time"],
+        age_min=int(filters["age_min"]),
+        age_max=int(filters["age_max"]),
+        time_required=filters["time_required"],
         energy=filters["energy"],
         location=filters["location"])
 
     if activity_id is None:
         await callback.message.answer(
-            "😔 Нет идей для таких условий, попробуйте изменить фильтры.")
+            "😔 Нет идей для таких условий, попробуйте изменить фильтры.",
+            disable_web_page_preview=True)
         return
 
     activity = get_activity_by_id(activity_id)
-
     if not activity:
         await callback.message.answer(
-            "😔 Нет идей для таких условий, попробуйте изменить фильтры.")
+            "😔 Нет идей для таких условий, попробуйте изменить фильтры.",
+            disable_web_page_preview=True)
         return
 
     text = (f"🎲 *{activity['title']}*\n\n"
@@ -44,27 +48,21 @@ async def send_activity(callback: types.CallbackQuery):
             f"📦 Материалы: {activity['materials'] or 'Не требуются'}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="Расскажи как играть",
-                callback_data=f"activity_details:{activity['id']}")
-        ],
-        [
-            InlineKeyboardButton(text="Покажи еще идею",
-                                 callback_data="activity_next")
-        ],
-        [
-            InlineKeyboardButton(text="Хочу другие фильтры",
-                                 callback_data="update_filters")
-        ]
+        [InlineKeyboardButton(text="Расскажи как играть",
+                              callback_data=f"activity_details:{activity['id']}")],
+        [InlineKeyboardButton(text="Покажи еще идею",
+                              callback_data="activity_next")],
+        [InlineKeyboardButton(text="Хочу другие фильтры",
+                              callback_data="update_filters")]
     ])
 
     log_event(user_id=callback.from_user.id,
               event_name="show_activity_L0",
               event_properties={
                   "activity_id": activity["id"],
-                  "age": filters["age"],
-                  "time": filters["time"],
+                  "age_min": filters["age_min"],
+                  "age_max": filters["age_max"],
+                  "time_required": filters["time_required"],
                   "energy": filters["energy"],
                   "location": filters["location"]
               },
@@ -74,59 +72,53 @@ async def send_activity(callback: types.CallbackQuery):
     image_url = activity.get("image_url")
 
     if image_url and image_url.strip():
-        await callback.message.answer_photo(photo=image_url,
-                                            caption=text,
-                                            parse_mode="Markdown",
-                                            reply_markup=keyboard)
+        await callback.message.answer_photo(
+            photo=image_url,
+            caption=text,
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+            disable_web_page_preview=True)
     else:
-        await callback.message.answer(text,
-                                      parse_mode="Markdown",
-                                      reply_markup=keyboard)
+        await callback.message.answer(
+            text,
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+            disable_web_page_preview=True)
 
-    # Записываем просмотр
     supabase.table("seen_activities").upsert({
-        "user_id":
-        callback.from_user.id,
-        "activity_id":
-        activity["id"],
-        "age":
-        filters["age"],
-        "time":
-        filters["time"],
-        "energy":
-        filters["energy"],
-        "location":
-        filters["location"],
-        "seen_at":
-        datetime.now().isoformat()
+        "user_id": callback.from_user.id,
+        "activity_id": activity["id"],
+        "age_min": filters["age_min"],
+        "age_max": filters["age_max"],
+        "time_required": filters["time_required"],
+        "energy": filters["energy"],
+        "location": filters["location"],
+        "seen_at": datetime.now().isoformat()
     }).execute()
 
 
+# --- L1 карточка (подробная)
 @activities_router.callback_query(F.data.startswith("activity_details:"))
 async def show_activity_details(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     activity_id = int(callback.data.split(":")[1])
 
-    response = supabase.table("activities").select("*").eq(
-        "id", activity_id).execute()
+    response = supabase.table("activities").select("*").eq("id", activity_id).execute()
     if not response.data:
-        await callback.message.answer(
-            "😔 Не удалось найти подробности активности.")
+        await callback.message.answer("😔 Не удалось найти подробности активности.",
+                                      disable_web_page_preview=True)
         await callback.answer()
         return
 
     activity = response.data[0]
-
     fav_response = supabase.table("favorites") \
         .select("id") \
         .eq("user_id", user_id) \
         .eq("activity_id", activity_id) \
         .execute()
-
     is_favorite = len(fav_response.data) > 0
 
     summary = "\n".join([f"💡 {s}" for s in (activity.get("summary") or [])])
-
     caption = f"🎲 *{activity['title']}*"
     text = (
         f"⏱️ {activity['time_required']} • ⚡️ {activity['energy']} • 📍 {activity['location']}\n\n"
@@ -135,132 +127,114 @@ async def show_activity_details(callback: types.CallbackQuery):
         f"{summary}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="Добавить в любимые ❤️"
-                if not is_favorite else "Убрать из любимых ✖️",
-                callback_data=
-                f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}"
-            )
-        ],
-        [
-            InlineKeyboardButton(text="Покажи еще идею",
-                                 callback_data="activity_next")
-        ],
-        [
-            InlineKeyboardButton(text="Хочу другие фильтры",
-                                 callback_data="update_filters")
-        ],
-        [
-            InlineKeyboardButton(text="Поделиться идеей 💌",
-                                 callback_data=f"share_activity:{activity_id}")
-        ]
+        [InlineKeyboardButton(
+            text="Добавить в любимые ❤️" if not is_favorite else "Убрать из любимых ✖️",
+            callback_data=f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}")],
+        [InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")],
+        [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")],
+        [InlineKeyboardButton(text="Поделиться идеей 💌",
+                              callback_data=f"share_activity:{activity_id}")]
     ])
 
     try:
         image_url = activity.get("image_url")
-
         if image_url and image_url.strip():
-            # Проверяем длину caption + текста
             if len(caption) + len(text) <= 1024:
                 await callback.message.answer_photo(
                     photo=image_url,
                     caption=f"{caption}\n\n{text}",
                     parse_mode="Markdown",
-                    reply_markup=keyboard)
+                    reply_markup=keyboard,
+                    disable_web_page_preview=True)
             else:
-                # Отправляем фото с коротким заголовком
-                await callback.message.answer_photo(photo=image_url,
-                                                    caption=caption[:1024],
-                                                    parse_mode="Markdown")
-
-                # Разбиваем длинный текст на части по 3500 символов
+                await callback.message.answer_photo(
+                    photo=image_url,
+                    caption=caption[:1024],
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True)
                 chunk_size = 3500
-                chunks = [
-                    text[i:i + chunk_size]
-                    for i in range(0, len(text), chunk_size)
-                ]
-
-                # Отправляем все части по очереди
+                chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
                 for i, chunk in enumerate(chunks):
                     if i < len(chunks) - 1:
-                        await callback.message.answer(chunk,
-                                                      parse_mode="Markdown")
+                        await callback.message.answer(
+                            chunk,
+                            parse_mode="Markdown",
+                            disable_web_page_preview=True)
                     else:
-                        # в последнем сообщении добавляем клавиатуру
-                        await callback.message.answer(chunk,
-                                                      parse_mode="Markdown",
-                                                      reply_markup=keyboard)
+                        await callback.message.answer(
+                            chunk,
+                            parse_mode="Markdown",
+                            reply_markup=keyboard,
+                            disable_web_page_preview=True)
         else:
-            # без картинки
             long_text = f"{caption}\n\n{text}"
             chunk_size = 3500
-            chunks = [
-                long_text[i:i + chunk_size]
-                for i in range(0, len(long_text), chunk_size)
-            ]
-
+            chunks = [long_text[i:i + chunk_size] for i in range(0, len(long_text), chunk_size)]
             for i, chunk in enumerate(chunks):
                 if i < len(chunks) - 1:
-                    await callback.message.answer(chunk, parse_mode="Markdown")
+                    await callback.message.answer(
+                        chunk,
+                        parse_mode="Markdown",
+                        disable_web_page_preview=True)
                 else:
-                    await callback.message.answer(chunk,
-                                                  parse_mode="Markdown",
-                                                  reply_markup=keyboard)
+                    await callback.message.answer(
+                        chunk,
+                        parse_mode="Markdown",
+                        reply_markup=keyboard,
+                        disable_web_page_preview=True)
     except Exception as e:
-        await callback.message.answer("⚠️ Не удалось отобразить идею.")
+        await callback.message.answer("⚠️ Не удалось отобразить идею.",
+                                      disable_web_page_preview=True)
         print("Ошибка при отправке подробностей:", e)
 
     log_event(user_id=callback.from_user.id,
               event_name="show_activity_L1",
               event_properties={
                   "activity_id": activity_id,
-                  "age": activity.get("age_min"),
-                  "time": activity.get("time_required"),
+                  "age_min": activity.get("age_min"),
+                  "age_max": activity.get("age_max"),
+                  "time_required": activity.get("time_required"),
                   "energy": activity.get("energy"),
                   "location": activity.get("location")
               },
-              session_id=user_data.get(callback.from_user.id,
-                                       {}).get("session_id"))
-
+              session_id=user_data.get(callback.from_user.id, {}).get("session_id"))
     await callback.answer()
 
 
+# --- кнопка “Покажи еще идею”
 @activities_router.callback_query(F.data == "activity_next")
 async def show_next_activity(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     filters = user_data.get(user_id)
 
-    # ✅ Если фильтров нет в памяти — достаём из Supabase
     if not filters:
-        response = supabase.table("user_filters").select("*").eq(
-            "user_id", user_id).execute()
+        response = supabase.table("user_filters").select("*").eq("user_id", user_id).execute()
         if not response.data:
-            await callback.message.answer(
-                "Сначала пройдите подбор заново: /start")
+            await callback.message.answer("Сначала пройдите подбор заново: /start",
+                                          disable_web_page_preview=True)
             await callback.answer()
             return
-
         filters = response.data[0]
-        user_data[
-            user_id] = filters  # 💾 Сохраняем в память для следующих запросов
+        user_data[user_id] = filters
 
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=user_id,
-        age=int(filters["age"]),
-        time=filters["time"],
+        age_min=int(filters["age_min"]),
+        age_max=int(filters["age_max"]),
+        time_required=filters["time_required"],
         energy=filters["energy"],
         location=filters["location"])
 
     if activity_id is None:
         await callback.message.answer(
-            "😔 Нет идей для таких условий, попробуйте изменить фильтры.")
+            "😔 Нет идей для таких условий, попробуйте изменить фильтры.",
+            disable_web_page_preview=True)
         return
 
     activity = get_activity_by_id(activity_id)
-
     if not activity:
-        await callback.message.answer("😔 Больше идей нет для этих условий.")
+        await callback.message.answer("😔 Больше идей нет для этих условий.",
+                                      disable_web_page_preview=True)
         await callback.answer()
         return
 
@@ -270,107 +244,73 @@ async def show_next_activity(callback: types.CallbackQuery):
             f"📦 Материалы: {activity['materials'] or 'Не требуются'}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="Расскажи как играть",
-                callback_data=f"activity_details:{activity['id']}")
-        ],
-        [
-            InlineKeyboardButton(text="Покажи еще идею",
-                                 callback_data="activity_next")
-        ],
-        [
-            InlineKeyboardButton(text="Хочу другие фильтры",
-                                 callback_data="update_filters")
-        ]
+        [InlineKeyboardButton(text="Расскажи как играть",
+                              callback_data=f"activity_details:{activity['id']}")],
+        [InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")],
+        [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")]
     ])
 
-    # ✅ Логирование
-    log_event(user_id=user_id,
-              event_name="show_activity_L0",
-              event_properties={
-                  "activity_id": activity["id"],
-                  "age": filters["age"],
-                  "time": filters["time"],
-                  "energy": filters["energy"],
-                  "location": filters["location"]
-              },
-              session_id=filters.get("session_id"))
-
-    log_event(user_id=user_id,
-              event_name="show_next_activity",
-              event_properties={
-                  "activity_id": activity["id"],
-                  "age": filters["age"],
-                  "time": filters["time"],
-                  "energy": filters["energy"],
-                  "location": filters["location"]
-              },
-              session_id=filters.get("session_id"))
-
     image_url = activity.get("image_url")
-
     if image_url and image_url.strip():
-        await callback.message.answer_photo(photo=image_url,
-                                            caption=text,
-                                            parse_mode="Markdown",
-                                            reply_markup=keyboard)
+        await callback.message.answer_photo(
+            photo=image_url,
+            caption=text,
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+            disable_web_page_preview=True)
     else:
-        await callback.message.answer(text,
-                                      parse_mode="Markdown",
-                                      reply_markup=keyboard)
+        await callback.message.answer(
+            text,
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+            disable_web_page_preview=True)
 
     supabase.table("seen_activities").upsert({
-        "user_id":
-        user_id,
-        "activity_id":
-        activity["id"],
-        "age":
-        filters["age"],
-        "time":
-        filters["time"],
-        "energy":
-        filters["energy"],
-        "location":
-        filters["location"],
-        "seen_at":
-        datetime.now().isoformat()
+        "user_id": user_id,
+        "activity_id": activity["id"],
+        "age_min": filters["age_min"],
+        "age_max": filters["age_max"],
+        "time_required": filters["time_required"],
+        "energy": filters["energy"],
+        "location": filters["location"],
+        "seen_at": datetime.now().isoformat()
     }).execute()
 
     await callback.answer()
 
 
+# --- /next команда
 @activities_router.message(Command("next"))
 async def next_command_handler(message: types.Message):
     user_id = message.from_user.id
     filters = user_data.get(user_id)
 
     if not filters:
-        response = supabase.table("user_filters").select("*").eq(
-            "user_id", user_id).execute()
+        response = supabase.table("user_filters").select("*").eq("user_id", user_id).execute()
         if not response.data:
-            await message.answer("Сначала пройдите подбор заново: /start")
+            await message.answer("Сначала пройдите подбор заново: /start",
+                                 disable_web_page_preview=True)
             return
-
         filters = response.data[0]
-        user_data[user_id] = filters  # 💾 Сохраняем в память
+        user_data[user_id] = filters
 
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=user_id,
-        age=int(filters["age"]),
-        time=filters["time"],
+        age_min=int(filters["age_min"]),
+        age_max=int(filters["age_max"]),
+        time_required=filters["time_required"],
         energy=filters["energy"],
         location=filters["location"])
 
     if activity_id is None:
-        await callback.message.answer(
-            "😔 Нет идей для таких условий, попробуйте изменить фильтры.")
+        await message.answer("😔 Нет идей для таких условий, попробуйте изменить фильтры.",
+                             disable_web_page_preview=True)
         return
 
     activity = get_activity_by_id(activity_id)
-
     if not activity:
-        await message.answer("😔 Больше идей нет для этих условий.")
+        await message.answer("😔 Больше идей нет для этих условий.",
+                             disable_web_page_preview=True)
         return
 
     text = (f"🎲 *{activity['title']}*\n\n"
@@ -379,163 +319,32 @@ async def next_command_handler(message: types.Message):
             f"📦 Материалы: {activity['materials'] or 'Не требуются'}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="Расскажи как играть",
-                callback_data=f"activity_details:{activity['id']}")
-        ],
-        [
-            InlineKeyboardButton(text="Покажи еще идею",
-                                 callback_data="activity_next")
-        ],
-        [
-            InlineKeyboardButton(text="Хочу другие фильтры",
-                                 callback_data="update_filters")
-        ]
+        [InlineKeyboardButton(text="Расскажи как играть",
+                              callback_data=f"activity_details:{activity['id']}")],
+        [InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")],
+        [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")]
     ])
 
     image_url = activity.get("image_url")
-
     if image_url and image_url.strip():
         await message.answer_photo(photo=image_url,
                                    caption=text,
                                    parse_mode="Markdown",
-                                   reply_markup=keyboard)
+                                   reply_markup=keyboard,
+                                   disable_web_page_preview=True)
     else:
         await message.answer(text,
                              parse_mode="Markdown",
-                             reply_markup=keyboard)
+                             reply_markup=keyboard,
+                             disable_web_page_preview=True)
 
     supabase.table("seen_activities").upsert({
-        "user_id":
-        user_id,
-        "activity_id":
-        activity["id"],
-        "age":
-        filters["age"],
-        "time":
-        filters["time"],
-        "energy":
-        filters["energy"],
-        "location":
-        filters["location"],
-        "seen_at":
-        datetime.now().isoformat()
+        "user_id": user_id,
+        "activity_id": activity["id"],
+        "age_min": filters["age_min"],
+        "age_max": filters["age_max"],
+        "time_required": filters["time_required"],
+        "energy": filters["energy"],
+        "location": filters["location"],
+        "seen_at": datetime.now().isoformat()
     }).execute()
-
-    log_event(user_id=user_id,
-              event_name="show_next_activity",
-              event_properties={
-                  "activity_id": activity["id"],
-                  "age": filters["age"],
-                  "time": filters["time"],
-                  "energy": filters["energy"],
-                  "location": filters["location"]
-              },
-              session_id=filters.get("session_id"))
-
-
-@activities_router.message(Command("show_activity"))
-async def show_activity_by_id(message: types.Message, command: CommandObject):
-    admin_id = int(os.getenv("ADMIN_USER_ID"))
-    if message.from_user.id != admin_id:
-        await message.answer("⛔ Эта команда только для разработчика.")
-        return
-
-    activity_id_str = command.args
-    if not activity_id_str or not activity_id_str.isdigit():
-        await message.answer("⚠️ Укажи ID активности: /show_activity 87")
-        return
-
-    activity_id = int(activity_id_str)
-
-    response = supabase.table("activities").select("*").eq(
-        "id", activity_id).execute()
-    if not response.data:
-        await message.answer("😔 Не удалось найти активность.")
-        return
-
-    activity = response.data[0]
-
-    summary = "\n".join([f"💡 {s}" for s in (activity.get("summary") or [])])
-    caption = f"🎲 *{activity['title']}*"
-    full_text = (
-        f"⏱️ {activity.get('time_required', 'не указано')} • "
-        f"⚡️ {activity.get('energy', 'не указана')} • "
-        f"📍 {activity.get('location', 'не указано')}\n\n"
-        f"📦 Материалы: {activity.get('materials') or 'Не требуются'}\n\n"
-        f"{activity.get('full_description', '')}\n\n"
-        f"{summary}")
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Добавить в любимые ❤️",
-                                 callback_data=f"favorite_add:{activity_id}"),
-            InlineKeyboardButton(text="Показать ещё",
-                                 callback_data="activity_next")
-        ],
-        [
-            InlineKeyboardButton(
-                text="Поделиться 💌",
-                callback_data=f"share_activity:{activity_id}"),
-            InlineKeyboardButton(text="Другие фильтры",
-                                 callback_data="update_filters")
-        ]
-    ])
-
-    try:
-        image_url = activity.get("image_url")
-
-        # Готовим один большой текст: заголовок + контент
-        full_message = f"{caption}\n\n{full_text}"
-
-        # Режем на куски по ~3500 символов
-        chunk_size = 3500
-        chunks = [
-            full_message[i:i + chunk_size]
-            for i in range(0, len(full_message), chunk_size)
-        ]
-
-        if image_url and image_url.strip():
-            # Отправляем фото с первой частью
-            await message.answer_photo(photo=image_url,
-                                       caption=chunks[0][:1024],
-                                       parse_mode="Markdown")
-
-            # Остальные куски текстом
-            for i, chunk in enumerate(chunks[1:], start=1):
-                if i < len(chunks) - 1:
-                    await message.answer(chunk, parse_mode="Markdown")
-                else:
-                    # последний кусок — уже с клавиатурой
-                    await message.answer(chunk,
-                                         parse_mode="Markdown",
-                                         reply_markup=keyboard)
-        else:
-            # Без картинки — просто шлём кусками
-            for i, chunk in enumerate(chunks):
-                if i < len(chunks) - 1:
-                    await message.answer(chunk, parse_mode="Markdown")
-                else:
-                    await message.answer(chunk,
-                                         parse_mode="Markdown",
-                                         reply_markup=keyboard)
-
-    except Exception as e:
-        await message.answer("⚠️ Ошибка при отправке активности.")
-        print("Ошибка в show_activity_by_id:", e)
-
-    try:
-        log_event(user_id=message.from_user.id,
-                  event_name="show_activity_by_id",
-                  event_properties={
-                      "activity_id": activity_id,
-                      "age": activity.get("age_min"),
-                      "time": activity.get("time_required"),
-                      "energy": activity.get("energy"),
-                      "location": activity.get("location")
-                  },
-                  session_id=user_data.get(message.from_user.id,
-                                           {}).get("session_id"))
-    except Exception as e:
-        print(f"[Amplitude] Failed to log show_activity_by_id: {e}")

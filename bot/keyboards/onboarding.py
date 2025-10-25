@@ -2,14 +2,12 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 age_keyboard = InlineKeyboardMarkup(inline_keyboard=[
     [
-        InlineKeyboardButton(text="3 года", callback_data="age_3"),
-        InlineKeyboardButton(text="4 года", callback_data="age_4"),
-        InlineKeyboardButton(text="5 лет", callback_data="age_5"),
+        InlineKeyboardButton(text="3–4 года", callback_data="age_3_4"),
+        InlineKeyboardButton(text="5–6 лет", callback_data="age_5_6"),
     ],
     [
-        InlineKeyboardButton(text="6 лет", callback_data="age_6"),
-        InlineKeyboardButton(text="7 лет", callback_data="age_7"),
-        InlineKeyboardButton(text="8 лет", callback_data="age_8"),
+        InlineKeyboardButton(text="7–8 лет", callback_data="age_7_8"),
+        InlineKeyboardButton(text="9–10+ лет", callback_data="age_9_10"),
     ],
 ])
 
@@ -40,26 +38,20 @@ energy_keyboard = InlineKeyboardMarkup(inline_keyboard=[
     ],
 ])
 
-location_keyboard = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Дома", callback_data="location_home"),
-            InlineKeyboardButton(text="На улице", callback_data="location_outside"),
-        ]
-    ]
-)
+location_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+    InlineKeyboardButton(text="Дома", callback_data="location_home"),
+    InlineKeyboardButton(text="На улице", callback_data="location_outside"),
+]])
 
 # клавиатура под L0 карточкой
-activity_keyboard = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text="Расскажи как играть", callback_data="activity_details")],
-        [InlineKeyboardButton(text="Покажи ещё идею", callback_data="activity_next")]
-    ]
-)
+activity_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+    InlineKeyboardButton(text="Расскажи как играть",
+                         callback_data="activity_details")
+], [
+    InlineKeyboardButton(text="Покажи ещё идею", callback_data="activity_next")
+]])
 
 # клавиатура под L1 карточкой
-activity_l1_keyboard = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text="Покажи ещё идею", callback_data="activity_next")]
-    ]
-)
+activity_l1_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+    InlineKeyboardButton(text="Покажи ещё идею", callback_data="activity_next")
+]])
