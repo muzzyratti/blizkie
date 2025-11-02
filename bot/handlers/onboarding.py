@@ -1,6 +1,7 @@
 from aiogram import Router, types, F
 from keyboards.onboarding import age_keyboard, time_keyboard, energy_keyboard, location_keyboard
 from utils.amplitude_logger import log_event, set_user_properties
+from utils.session import ensure_filters  # ✅ централизовано
 from .user_state import user_data
 from .activities import send_activity, show_next_activity
 from db.supabase_client import supabase
@@ -11,9 +12,10 @@ onboarding_router = Router()
 @onboarding_router.callback_query(F.data == "start_onboarding")
 async def start_onboarding(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    user_data[user_id] = {"mode": "onboarding"}
+    ctx = ensure_filters(user_id)
+    ctx["mode"] = "onboarding"
 
-    log_event(user_id, "onboarding_started")
+    log_event(user_id, "onboarding_started", session_id=ctx["session_id"])
 
     await callback.message.answer(
         "Сколько лет вашему ребёнку? (если их несколько, выбирайте младшего):",
@@ -24,6 +26,7 @@ async def start_onboarding(callback: types.CallbackQuery):
 @onboarding_router.callback_query(F.data.startswith("age_"))
 async def process_age(callback: types.CallbackQuery):
     user_id = callback.from_user.id
+    ctx = ensure_filters(user_id)
     age_data = callback.data.replace("age_", "")
 
     if age_data == "3_4":
@@ -35,15 +38,15 @@ async def process_age(callback: types.CallbackQuery):
     elif age_data == "9_10":
         age_min, age_max = 9, 10
     else:
-        age_min = age_max = 0  # fallback
+        age_min = age_max = 0
 
-    user_data.setdefault(user_id, {})["age_min"] = age_min
-    user_data[user_id]["age_max"] = age_max
+    ctx["age_min"] = age_min
+    ctx["age_max"] = age_max
 
-    log_event(user_id, "set_age", {"age_min": age_min, "age_max": age_max})
+    log_event(user_id, "set_age", {"age_min": age_min, "age_max": age_max}, session_id=ctx["session_id"])
     set_user_properties(user_id, {"age_min": age_min, "age_max": age_max})
 
-    mode = user_data[user_id].get("mode")
+    mode = ctx.get("mode")
     if mode == "onboarding":
         await callback.message.answer(
             f"Вы выбрали возрастную группу: {age_min}–{age_max} лет.\n\n"
@@ -62,14 +65,16 @@ async def process_age(callback: types.CallbackQuery):
 
 @onboarding_router.callback_query(F.data.startswith("time_"))
 async def process_time(callback: types.CallbackQuery):
-    time_choice = callback.data.split("_")[1]
     user_id = callback.from_user.id
-    user_data[user_id]["time_required"] = time_choice
+    ctx = ensure_filters(user_id)
+    time_choice = callback.data.split("_")[1]
 
-    log_event(user_id, "set_time", {"time_required": time_choice})
+    ctx["time_required"] = time_choice
+
+    log_event(user_id, "set_time", {"time_required": time_choice}, session_id=ctx["session_id"])
     set_user_properties(user_id, {"time_required": time_choice})
 
-    mode = user_data[user_id].get("mode")
+    mode = ctx.get("mode")
     if mode == "onboarding":
         await callback.message.answer(
             "Сколько у вас сегодня энергии на игру? (честно 😌)",
@@ -86,17 +91,18 @@ async def process_time(callback: types.CallbackQuery):
 
 @onboarding_router.callback_query(F.data.startswith("energy_"))
 async def process_energy(callback: types.CallbackQuery):
-    energy_choice = callback.data.split("_")[1]
     user_id = callback.from_user.id
-    user_data[user_id]["energy"] = energy_choice
+    ctx = ensure_filters(user_id)
+    energy_choice = callback.data.split("_")[1]
 
-    log_event(user_id, "set_energy", {"energy": energy_choice})
+    ctx["energy"] = energy_choice
+
+    log_event(user_id, "set_energy", {"energy": energy_choice}, session_id=ctx["session_id"])
     set_user_properties(user_id, {"energy": energy_choice})
 
-    mode = user_data[user_id].get("mode")
+    mode = ctx.get("mode")
     if mode == "onboarding":
-        await callback.message.answer("Где будете проводить время?",
-                                      reply_markup=location_keyboard)
+        await callback.message.answer("Где будете проводить время?", reply_markup=location_keyboard)
     elif mode == "update":
         await callback.message.answer("Энергия обновлена. Вот идея для вас 👇")
         await show_next_activity(callback)
@@ -109,24 +115,26 @@ async def process_energy(callback: types.CallbackQuery):
 
 @onboarding_router.callback_query(F.data.startswith("location_"))
 async def process_location(callback: types.CallbackQuery):
-    location_choice = callback.data.split("_")[1]
     user_id = callback.from_user.id
-    user_data[user_id]["location"] = location_choice
+    ctx = ensure_filters(user_id)
+    location_choice = callback.data.split("_")[1]
 
-    log_event(user_id, "set_location", {"location": location_choice})
+    ctx["location"] = location_choice
+
+    log_event(user_id, "set_location", {"location": location_choice}, session_id=ctx["session_id"])
     set_user_properties(user_id, {"location": location_choice})
 
-    mode = user_data[user_id].get("mode")
+    mode = ctx.get("mode")
     if mode == "onboarding":
-        log_event(user_id, "onboarding_completed")
+        log_event(user_id, "onboarding_completed", session_id=ctx["session_id"])
 
         supabase.table("user_filters").upsert({
             "user_id": user_id,
-            "age_min": user_data[user_id]["age_min"],
-            "age_max": user_data[user_id]["age_max"],
-            "time_required": user_data[user_id]["time_required"],
-            "energy": user_data[user_id]["energy"],
-            "location": user_data[user_id]["location"]
+            "age_min": ctx["age_min"],
+            "age_max": ctx["age_max"],
+            "time_required": ctx["time_required"],
+            "energy": ctx["energy"],
+            "location": ctx["location"]
         }).execute()
 
         await send_activity(callback)
@@ -143,26 +151,25 @@ async def process_location(callback: types.CallbackQuery):
 @onboarding_router.callback_query(F.data == "continue_with_filters")
 async def continue_with_saved_filters(callback: types.CallbackQuery):
     user_id = callback.from_user.id
+    ctx = ensure_filters(user_id)
 
     response = supabase.table("user_filters").select("*").eq("user_id", user_id).execute()
     filters = response.data[0] if response.data else None
 
     if not filters:
-        await callback.message.answer(
-            "Не удалось найти сохранённые фильтры 😔 Попробуйте начать заново.")
+        await callback.message.answer("Не удалось найти сохранённые фильтры 😔 Попробуйте начать заново.")
         await callback.answer()
         return
 
-    # Загружаем фильтры в память
-    user_data[user_id] = {
+    # Обновляем фильтры в памяти, session_id сохраняется
+    ctx.update({
         "age_min": filters["age_min"],
         "age_max": filters["age_max"],
         "time_required": filters["time_required"],
         "energy": filters["energy"],
         "location": filters["location"],
-        "session_id": user_data.get(user_id, {}).get("session_id"),
         "mode": "onboarding"
-    }
+    })
 
     await callback.answer("Показываю идеи по вашему выбору 👇")
     await send_activity(callback)
