@@ -132,8 +132,8 @@ async def show_activity_details(callback: types.CallbackQuery):
             callback_data=f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}")],
         [InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")],
         [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")],
-        [InlineKeyboardButton(text="Поделиться идеей 💌",
-                              callback_data=f"share_activity:{activity_id}")]
+        [InlineKeyboardButton(text="Поделиться идеей 💌", callback_data=f"share_activity:{activity_id}")],
+        [InlineKeyboardButton(text="💬 Оставить отзыв", callback_data=f"feedback_button:{activity_id}")]
     ])
 
     try:

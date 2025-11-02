@@ -10,6 +10,7 @@ from handlers.favorites import favorites_router
 from handlers.share import share_router
 from handlers.update_filters import update_filters_router
 from handlers.feedback import feedback_router
+from handlers.feedback_activity import feedback_router as feedback_activity_router
 from handlers.subscribe import subscribe_router
 from handlers import donate
 
@@ -40,6 +41,7 @@ async def main():
     dp.include_router(share_router)
     dp.include_router(update_filters_router)
     dp.include_router(feedback_router)
+    dp.include_router(feedback_activity_router)
     dp.include_router(subscribe_router)
     dp.include_router(donate.router)
 
