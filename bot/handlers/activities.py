@@ -1,9 +1,9 @@
 from aiogram import Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import Command
 from db.supabase_client import get_activity, supabase, TIME_MAP, ENERGY_MAP, location_MAP
-from utils.amplitude_logger import log_event
-from utils.session import ensure_filters  # ✅ новый импорт
+from utils.amplitude_logger import log_event as amplitude_log_event  # ← алиас
+from utils.session import ensure_filters
 from .user_state import user_data
 from db.seen import get_next_activity_with_filters
 from datetime import datetime
@@ -19,7 +19,7 @@ def get_activity_by_id(activity_id: int):
 # --- L0 карточка (короткая)
 async def send_activity(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    ctx = ensure_filters(user_id)  # ✅ централизованная проверка фильтров и session_id
+    ctx = ensure_filters(user_id)
 
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=user_id,
@@ -50,7 +50,7 @@ async def send_activity(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")]
     ])
 
-    log_event(
+    amplitude_log_event(
         user_id=user_id,
         event_name="show_activity_L0",
         event_properties={
@@ -88,7 +88,7 @@ async def send_activity(callback: types.CallbackQuery):
 @activities_router.callback_query(F.data.startswith("activity_details:"))
 async def show_activity_details(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    ctx = ensure_filters(user_id)  # ✅ добавлено
+    ctx = ensure_filters(user_id)
     activity_id = int(callback.data.split(":")[1])
 
     response = supabase.table("activities").select("*").eq("id", activity_id).execute()
@@ -156,7 +156,23 @@ async def show_activity_details(callback: types.CallbackQuery):
         await callback.message.answer("⚠️ Не удалось отобразить идею.", disable_web_page_preview=True)
         print("Ошибка при отправке подробностей:", e)
 
-    log_event(
+    # --- учёт показов L1 и авто-микрофидбек
+    try:
+        # увеличиваем счетчик показов L1 в текущей сессии
+        ctx["l1_counter"] = int(ctx.get("l1_counter", 0)) + 1
+
+        # пробуем спросить авто-фидбек по интервалам/кулдауну
+        from handlers.feedback_activity import maybe_prompt_auto_feedback  # локальный импорт
+        await maybe_prompt_auto_feedback(
+            user_id=user_id,
+            activity_id=activity_id,
+            ctx=ctx,
+            bot=callback.bot
+        )
+    except Exception as e:
+        print(f"[microfeedback] trigger error: {e}")
+    
+    amplitude_log_event(
         user_id=user_id,
         event_name="show_activity_L1",
         event_properties={
@@ -167,7 +183,7 @@ async def show_activity_details(callback: types.CallbackQuery):
             "energy": activity.get("energy"),
             "location": activity.get("location")
         },
-        session_id=ctx["session_id"]  # ✅ единый session_id
+        session_id=ctx["session_id"]
     )
     await callback.answer()
 
@@ -176,7 +192,7 @@ async def show_activity_details(callback: types.CallbackQuery):
 @activities_router.callback_query(F.data == "activity_next")
 async def show_next_activity(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    ctx = ensure_filters(user_id)  # ✅ заменили всё ручное
+    ctx = ensure_filters(user_id)
 
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=user_id,
@@ -237,7 +253,7 @@ async def show_next_activity(callback: types.CallbackQuery):
 @activities_router.message(Command("next"))
 async def next_command_handler(message: types.Message):
     user_id = message.from_user.id
-    ctx = ensure_filters(user_id)  # ✅ централизованно
+    ctx = ensure_filters(user_id)
 
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=user_id,
