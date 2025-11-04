@@ -2,11 +2,14 @@ from aiogram import Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from db.supabase_client import get_activity, supabase, TIME_MAP, ENERGY_MAP, location_MAP
-from utils.amplitude_logger import log_event as amplitude_log_event  # ← алиас
+from utils.amplitude_logger import log_event as amplitude_log_event
 from utils.session import ensure_filters
 from .user_state import user_data
 from db.seen import get_next_activity_with_filters
 from datetime import datetime
+from utils.paywall_guard import should_block_l1, should_block_l0
+from handlers.paywall import send_universal_paywall
+from utils.session_tracker import get_current_session_id
 
 activities_router = Router()
 
@@ -17,9 +20,16 @@ def get_activity_by_id(activity_id: int):
 
 
 # --- L0 карточка (короткая)
+@activities_router.callback_query(F.data == "activity_start")
 async def send_activity(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     ctx = ensure_filters(user_id)
+    session_id = ctx.get("session_id") or get_current_session_id(user_id)
+
+    # PAYWALL: если превышен лимит L0 (15)
+    if should_block_l0(user_id):
+        await send_universal_paywall(callback, reason="l0_limit", user_id=user_id, session_id=session_id)
+        return
 
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=user_id,
@@ -31,12 +41,14 @@ async def send_activity(callback: types.CallbackQuery):
     )
 
     if activity_id is None:
-        await callback.message.answer("😔 Нет идей для таких условий, попробуйте изменить фильтры.", disable_web_page_preview=True)
+        await callback.message.answer("😔 Нет идей для таких условий, попробуйте изменить фильтры.",
+                                      disable_web_page_preview=True)
         return
 
     activity = get_activity_by_id(activity_id)
     if not activity:
-        await callback.message.answer("😔 Нет идей для таких условий, попробуйте изменить фильтры.", disable_web_page_preview=True)
+        await callback.message.answer("😔 Нет идей для таких условий, попробуйте изменить фильтры.",
+                                      disable_web_page_preview=True)
         return
 
     text = (f"🎲 *{activity['title']}*\n\n"
@@ -61,7 +73,7 @@ async def send_activity(callback: types.CallbackQuery):
             "energy": ctx["energy"],
             "location": ctx["location"]
         },
-        session_id=ctx["session_id"]
+        session_id=session_id
     )
 
     image_url = activity.get("image_url")
@@ -80,6 +92,7 @@ async def send_activity(callback: types.CallbackQuery):
         "time_required": ctx["time_required"],
         "energy": ctx["energy"],
         "location": ctx["location"],
+        "level": "l0",
         "seen_at": datetime.now().isoformat()
     }).execute()
 
@@ -89,20 +102,24 @@ async def send_activity(callback: types.CallbackQuery):
 async def show_activity_details(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     ctx = ensure_filters(user_id)
+    session_id = ctx.get("session_id") or get_current_session_id(user_id)
     activity_id = int(callback.data.split(":")[1])
+
+    # PAYWALL: если превышен лимит L1 (5)
+    if should_block_l1(user_id):
+        await send_universal_paywall(callback, reason="l1_limit", user_id=user_id, session_id=session_id)
+        return
 
     response = supabase.table("activities").select("*").eq("id", activity_id).execute()
     if not response.data:
-        await callback.message.answer("😔 Не удалось найти подробности активности.", disable_web_page_preview=True)
+        await callback.message.answer("😔 Не удалось найти подробности активности.",
+                                      disable_web_page_preview=True)
         await callback.answer()
         return
 
     activity = response.data[0]
-    fav_response = supabase.table("favorites") \
-        .select("id") \
-        .eq("user_id", user_id) \
-        .eq("activity_id", activity_id) \
-        .execute()
+    fav_response = supabase.table("favorites").select("id") \
+        .eq("user_id", user_id).eq("activity_id", activity_id).execute()
     is_favorite = len(fav_response.data) > 0
 
     summary = "\n".join([f"💡 {s}" for s in (activity.get("summary") or [])])
@@ -138,31 +155,46 @@ async def show_activity_details(callback: types.CallbackQuery):
                 chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
                 for i, chunk in enumerate(chunks):
                     if i < len(chunks) - 1:
-                        await callback.message.answer(chunk, parse_mode="Markdown", disable_web_page_preview=True)
+                        await callback.message.answer(chunk, parse_mode="Markdown",
+                                                      disable_web_page_preview=True)
                     else:
                         await callback.message.answer(chunk, parse_mode="Markdown",
-                                                      reply_markup=keyboard, disable_web_page_preview=True)
+                                                      reply_markup=keyboard,
+                                                      disable_web_page_preview=True)
         else:
             long_text = f"{caption}\n\n{text}"
             chunk_size = 3500
             chunks = [long_text[i:i + chunk_size] for i in range(0, len(long_text), chunk_size)]
             for i, chunk in enumerate(chunks):
                 if i < len(chunks) - 1:
-                    await callback.message.answer(chunk, parse_mode="Markdown", disable_web_page_preview=True)
+                    await callback.message.answer(chunk, parse_mode="Markdown",
+                                                  disable_web_page_preview=True)
                 else:
                     await callback.message.answer(chunk, parse_mode="Markdown",
-                                                  reply_markup=keyboard, disable_web_page_preview=True)
+                                                  reply_markup=keyboard,
+                                                  disable_web_page_preview=True)
     except Exception as e:
-        await callback.message.answer("⚠️ Не удалось отобразить идею.", disable_web_page_preview=True)
+        await callback.message.answer("⚠️ Не удалось отобразить идею.",
+                                      disable_web_page_preview=True)
         print("Ошибка при отправке подробностей:", e)
 
     # --- учёт показов L1 и авто-микрофидбек
     try:
-        # увеличиваем счетчик показов L1 в текущей сессии
+        supabase.table("seen_activities").upsert({
+            "user_id": user_id,
+            "activity_id": activity_id,
+            "age_min": activity.get("age_min"),
+            "age_max": activity.get("age_max"),
+            "time_required": activity.get("time_required"),
+            "energy": activity.get("energy"),
+            "location": activity.get("location"),
+            "level": "l1",
+            "seen_at": datetime.now().isoformat()
+        }).execute()
+
         ctx["l1_counter"] = int(ctx.get("l1_counter", 0)) + 1
 
-        # пробуем спросить авто-фидбек по интервалам/кулдауну
-        from handlers.feedback_activity import maybe_prompt_auto_feedback  # локальный импорт
+        from handlers.feedback_activity import maybe_prompt_auto_feedback
         await maybe_prompt_auto_feedback(
             user_id=user_id,
             activity_id=activity_id,
@@ -171,7 +203,7 @@ async def show_activity_details(callback: types.CallbackQuery):
         )
     except Exception as e:
         print(f"[microfeedback] trigger error: {e}")
-    
+
     amplitude_log_event(
         user_id=user_id,
         event_name="show_activity_L1",
@@ -183,7 +215,7 @@ async def show_activity_details(callback: types.CallbackQuery):
             "energy": activity.get("energy"),
             "location": activity.get("location")
         },
-        session_id=ctx["session_id"]
+        session_id=session_id
     )
     await callback.answer()
 
@@ -193,6 +225,12 @@ async def show_activity_details(callback: types.CallbackQuery):
 async def show_next_activity(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     ctx = ensure_filters(user_id)
+    session_id = ctx.get("session_id") or get_current_session_id(user_id)
+
+    # PAYWALL: если превышен лимит L0 (15)
+    if should_block_l0(user_id):
+        await send_universal_paywall(callback, reason="l0_limit", user_id=user_id, session_id=session_id)
+        return
 
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=user_id,
@@ -221,9 +259,11 @@ async def show_next_activity(callback: types.CallbackQuery):
             f"📦 Материалы: {activity['materials'] or 'Не требуются'}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Расскажи как играть", callback_data=f"activity_details:{activity['id']}")],
+        [InlineKeyboardButton(text="Расскажи как играть",
+                              callback_data=f"activity_details:{activity['id']}")],
         [InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")],
-        [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")]
+        [InlineKeyboardButton(text="Хочу другие фильтры",
+                              callback_data="update_filters")]
     ])
 
     image_url = activity.get("image_url")
@@ -232,7 +272,8 @@ async def show_next_activity(callback: types.CallbackQuery):
                                             parse_mode="Markdown", reply_markup=keyboard,
                                             disable_web_page_preview=True)
     else:
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=keyboard,
+        await callback.message.answer(text, parse_mode="Markdown",
+                                      reply_markup=keyboard,
                                       disable_web_page_preview=True)
 
     supabase.table("seen_activities").upsert({
@@ -243,17 +284,24 @@ async def show_next_activity(callback: types.CallbackQuery):
         "time_required": ctx["time_required"],
         "energy": ctx["energy"],
         "location": ctx["location"],
+        "level": "l0",
         "seen_at": datetime.now().isoformat()
     }).execute()
 
     await callback.answer()
 
 
-# --- /next команда
+# --- /next команда (аналог show_next_activity)
 @activities_router.message(Command("next"))
 async def next_command_handler(message: types.Message):
     user_id = message.from_user.id
     ctx = ensure_filters(user_id)
+    session_id = ctx.get("session_id") or get_current_session_id(user_id)
+
+    # PAYWALL: если превышен лимит L0
+    if should_block_l0(user_id):
+        await send_universal_paywall(message, reason="l0_limit", user_id=user_id, session_id=session_id)
+        return
 
     activity_id, was_reset = get_next_activity_with_filters(
         user_id=user_id,
@@ -281,9 +329,12 @@ async def next_command_handler(message: types.Message):
             f"📦 Материалы: {activity['materials'] or 'Не требуются'}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Расскажи как играть", callback_data=f"activity_details:{activity['id']}")],
-        [InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")],
-        [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")]
+        [InlineKeyboardButton(text="Расскажи как играть",
+                              callback_data=f"activity_details:{activity['id']}")],
+        [InlineKeyboardButton(text="Покажи еще идею",
+                              callback_data="activity_next")],
+        [InlineKeyboardButton(text="Хочу другие фильтры",
+                              callback_data="update_filters")]
     ])
 
     image_url = activity.get("image_url")
@@ -292,7 +343,8 @@ async def next_command_handler(message: types.Message):
                                    parse_mode="Markdown", reply_markup=keyboard,
                                    disable_web_page_preview=True)
     else:
-        await message.answer(text, parse_mode="Markdown", reply_markup=keyboard,
+        await message.answer(text, parse_mode="Markdown",
+                             reply_markup=keyboard,
                              disable_web_page_preview=True)
 
     supabase.table("seen_activities").upsert({
@@ -303,5 +355,6 @@ async def next_command_handler(message: types.Message):
         "time_required": ctx["time_required"],
         "energy": ctx["energy"],
         "location": ctx["location"],
+        "level": "l0",
         "seen_at": datetime.now().isoformat()
     }).execute()

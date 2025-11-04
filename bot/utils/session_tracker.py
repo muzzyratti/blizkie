@@ -100,3 +100,13 @@ async def sync_sessions_to_db():
             logger.warning(f"[session_tracker] ❌ Sync error: {e}")
 
         await asyncio.sleep(SYNC_INTERVAL_SECONDS)
+
+def get_current_session_id(user_id: int) -> str | None:
+    """
+    Возвращает текущий session_id пользователя из user_data, если он есть.
+    Нужно для логов и Amplitude.
+    """
+    ctx = user_data.get(user_id)
+    if not ctx:
+        return None
+    return ctx.get("session_id")

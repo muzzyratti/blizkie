@@ -1,18 +1,17 @@
-entrypoint = "bot/main.py"
 modules = ["python-3.11"]
 
 [nix]
-channel = "stable-25_05"
-
-[unitTest]
-language = "python3"
-
-[gitHubImport]
-requiredFiles = [".replit", "replit.nix"]
-
-[deployment]
-run = "python3 bot/main.py"
-deploymentTarget = "cloudrun"
 
 [agent]
 expertMode = true
+
+[workflows]
+
+[[workflows.workflow]]
+name = "bot/main.py"
+mode = "sequential"
+author = 15059478
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python3 bot/main.py"

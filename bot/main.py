@@ -13,6 +13,7 @@ from handlers.feedback import feedback_router
 from handlers.feedback_activity import feedback_router as feedback_activity_router
 from handlers.subscribe import subscribe_router
 from handlers import donate
+from handlers.paywall import paywall_router
 from utils.session_tracker import sync_sessions_to_db
 
 logger = setup_logger()
@@ -35,6 +36,7 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
+    # --- подключаем все роутеры
     dp.include_router(start.router)
     dp.include_router(onboarding_router)
     dp.include_router(activities_router)
@@ -45,14 +47,15 @@ async def main():
     dp.include_router(feedback_activity_router)
     dp.include_router(subscribe_router)
     dp.include_router(donate.router)
+    dp.include_router(paywall_router)
 
     logger.info("Устанавливаем команды бота...")
     await set_bot_commands(bot)
 
     logger.info("Бот запускается...")
-    
+
     asyncio.create_task(sync_sessions_to_db())
-    
+
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
