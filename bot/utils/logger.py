@@ -8,6 +8,7 @@ def setup_logger():
     - На Replit логирует только в консоль.
     - На VPS (если есть переменная окружения LOG_TO_FILE=true) — пишет и в файл logs/app.log.
     """
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     logger = logging.getLogger("blizkieigry")
     if logger.handlers:  # уже настроен
         return logger

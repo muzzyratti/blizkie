@@ -107,6 +107,8 @@ async def show_activity_details(callback: types.CallbackQuery):
 
     # PAYWALL: если превышен лимит L1 (5)
     if should_block_l1(user_id):
+        ctx = user_data.setdefault(user_id, {})
+        ctx["last_paywall_reason"] = "l1_limit"
         await send_universal_paywall(callback, reason="l1_limit", user_id=user_id, session_id=session_id)
         return
 

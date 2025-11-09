@@ -17,18 +17,20 @@ def log_event(
     event_name: str,
     event_properties: dict | None = None,
     session_id: str | None = None,
+    mutate_session: bool = True,   # ✅ добавлено
 ):
     """
     Отправляет событие в Amplitude и обновляет контекст сессии.
     """
     try:
-        # обновляем контекст пользователя
-        ctx = user_data.setdefault(user_id, {})
-        ctx["last_seen"] = datetime.utcnow()
-        ctx["actions_count"] = ctx.get("actions_count", 0) + 1
-        if not ctx.get("first_event"):
-            ctx["first_event"] = event_name
-        ctx["last_event"] = event_name
+        if mutate_session:
+            ctx = user_data.setdefault(user_id, {})
+            now = datetime.utcnow()
+            ctx["last_seen"] = now
+            ctx["actions_count"] = ctx.get("actions_count", 0) + 1
+            if not ctx.get("first_event"):
+                ctx["first_event"] = event_name
+            ctx["last_event"] = event_name
 
         # локальная среда (Replit) без API-ключа
         if not AMPLITUDE_API_KEY:

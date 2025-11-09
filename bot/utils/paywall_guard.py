@@ -64,3 +64,13 @@ def should_block_l0(user_id: int) -> bool:
     if not rules or is_premium(user_id):
         return False
     return l0_views_count(user_id) >= rules["l0"]
+
+def is_user_limited(user_id: int) -> bool:
+    """
+    True, если юзер достиг лимита бесплатных L1 карточек.
+    """
+    try:
+        return should_block_l1(user_id)   # <-- вот правильная проверка лимита
+    except Exception as e:
+        print(f"[paywall_guard] is_user_limited err user={user_id}: {e}")
+        return False

@@ -15,6 +15,8 @@ from handlers.subscribe import subscribe_router
 from handlers import donate
 from handlers.paywall import paywall_router
 from utils.session_tracker import sync_sessions_to_db
+from workers.worker_pushes import run_worker
+from middleware.activity_middleware import ActivityMiddleware
 
 logger = setup_logger()
 
@@ -36,6 +38,9 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
+    dp.message.middleware(ActivityMiddleware())
+    dp.callback_query.middleware(ActivityMiddleware())
+    
     # --- подключаем все роутеры
     dp.include_router(start.router)
     dp.include_router(onboarding_router)
@@ -55,7 +60,8 @@ async def main():
     logger.info("Бот запускается...")
 
     asyncio.create_task(sync_sessions_to_db())
-
+    asyncio.create_task(run_worker(bot))  # фоновый push-воркер
+    
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 

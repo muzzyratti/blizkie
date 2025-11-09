@@ -14,3 +14,6 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), env_file), overr
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не найден в переменных окружения")
+
+# Контакт поддержки (телеграм-username без @). Если оставить None — кнопка не будет показана.
+SUPPORT_USERNAME = "discoklopkov"  # или None
