@@ -24,11 +24,13 @@ def get_paywall_settings():
     if _PAYWALL_CACHE:
         return _PAYWALL_CACHE
 
-    row = supabase.table("feature_flags") \
-        .select("value_json") \
-        .eq("key", "paywall_requisites") \
-        .maybe_single() \
+    row = (
+        supabase.table("feature_flags")
+        .select("value_json")
+        .eq("key", "paywall_requisites")
+        .maybe_single()
         .execute()
+    )
 
     if not row or not row.data:
         raise RuntimeError("feature_flags: key 'paywall_requisites' not found")
@@ -48,9 +50,9 @@ def _paywall_text(settings: dict) -> str:
 
     return (
         "🧩 Вы дошли до лимита бесплатной версии.\n\n"
-        "Откройте полный доступ — чтобы "
-        "в любую секунду найти идею *как провести время с ребёнком прямо сейчас*, под ваше "
-        "время, энергию и возраст ребёнка.\n\n"
+        "Открыв подписку, вы получите неограниченный доступ к идеям — чтобы "
+        "в любую секунду найти *идею, что сделать с ребёнком прямо сейчас*, "
+        "под ваше время, энергию и возраст ребёнка.\n\n"
         "Мы регулярно добавляем новые идеи, чтобы тёплые моменты становились привычкой "
         "и делали семью ближе каждый день.\n\n"
         f"*{price} ₽ в месяц. Автопродление.*\n"
@@ -90,20 +92,24 @@ def paywall_kb(settings: dict, can_continue_l0: bool):
     oferta = settings["oferta"]
 
     rows = [
-        [InlineKeyboardButton(
-            text=f"🔓 Оплатить подписку — {settings['price']} ₽ в месяц",
-            url=subscribe_url
-        )],
+        [
+            InlineKeyboardButton(
+                text=f"🔓 Оплатить подписку — {settings['price']} ₽ в месяц",
+                url=subscribe_url,
+            )
+        ],
         [InlineKeyboardButton(text="📄 Договор оферты", url=oferta)],
-        [InlineKeyboardButton(text="ℹ️ Реквизиты", callback_data="pay_wall_requisites")]
+        [InlineKeyboardButton(text="ℹ️ Реквизиты", callback_data="pay_wall_requisites")],
     ]
 
     if SUPPORT_USERNAME:
         rows.append(
-            [InlineKeyboardButton(
-                text="💬 Поддержка",
-                url=f"https://t.me/{SUPPORT_USERNAME}"
-            )]
+            [
+                InlineKeyboardButton(
+                    text="💬 Поддержка",
+                    url=f"https://t.me/{SUPPORT_USERNAME}",
+                )
+            ]
         )
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -113,19 +119,23 @@ def requisites_kb(settings: dict):
     subscribe_url = settings["subscribe_url"]
 
     rows = [
-        [InlineKeyboardButton(
-            text=f"💳 Оплатить подписку — {settings['price']} ₽ в месяц",
-            url=subscribe_url
-        )],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="paywall_back")]
+        [
+            InlineKeyboardButton(
+                text=f"💳 Оплатить подписку — {settings['price']} ₽ в месяц",
+                url=subscribe_url,
+            )
+        ],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="paywall_back")],
     ]
 
     if SUPPORT_USERNAME:
         rows.append(
-            [InlineKeyboardButton(
-                text="💬 Поддержка",
-                url=f"https://t.me/{SUPPORT_USERNAME}"
-            )]
+            [
+                InlineKeyboardButton(
+                    text="💬 Поддержка",
+                    url=f"https://t.me/{SUPPORT_USERNAME}",
+                )
+            ]
         )
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -151,12 +161,18 @@ async def send_universal_paywall(msg_or_cb, reason: str, user_id: int, session_i
 
     if isinstance(msg_or_cb, types.CallbackQuery):
         await msg_or_cb.message.answer(
-            text, reply_markup=kb, parse_mode="Markdown", disable_web_page_preview=True
+            text,
+            reply_markup=kb,
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
         )
         await msg_or_cb.answer()
     else:
         await msg_or_cb.answer(
-            text, reply_markup=kb, parse_mode="Markdown", disable_web_page_preview=True
+            text,
+            reply_markup=kb,
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
         )
 
 
@@ -172,7 +188,7 @@ async def on_pay_requisites(cb: types.CallbackQuery):
         _requisites_text(settings),
         reply_markup=requisites_kb(settings),
         parse_mode="Markdown",
-        disable_web_page_preview=True
+        disable_web_page_preview=True,
     )
     await cb.answer()
 
@@ -185,9 +201,6 @@ async def on_paywall_back(cb: types.CallbackQuery):
         _paywall_text(settings),
         reply_markup=paywall_kb(settings, can_continue_l0=False),
         parse_mode="Markdown",
-        disable_web_page_preview=True
+        disable_web_page_preview=True,
     )
     await cb.answer()
-
-
-# =======================
