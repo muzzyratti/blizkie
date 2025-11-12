@@ -6,6 +6,7 @@ from utils.paywall_guard import l0_views_count, _rules
 from config import SUPPORT_USERNAME
 from handlers.user_state import user_data
 from db.supabase_client import supabase
+from utils.robokassa import make_payment_link
 
 paywall_router = Router()
 
@@ -73,7 +74,7 @@ def _requisites_text(settings: dict) -> str:
     return (
         "ℹ️ *Реквизиты:*\n\n"
         f"ФИО: {fio}\n"
-        f"ИНН: `{inn}`\n"
+        f"ИНН: {inn}\n"
         f"Email: {email}\n"
         f"Telegram: {tg}\n\n"
         "Документы:\n"
@@ -88,54 +89,45 @@ def _requisites_text(settings: dict) -> str:
 # ============================================================
 
 def paywall_kb(settings: dict, can_continue_l0: bool):
-    subscribe_url = settings["subscribe_url"]
-    oferta = settings["oferta"]
+    price = settings["price"]
 
     rows = [
-        [
-            InlineKeyboardButton(
-                text=f"🔓 Оплатить подписку — {settings['price']} ₽ в месяц",
-                url=subscribe_url,
-            )
-        ],
-        [InlineKeyboardButton(text="📄 Договор оферты", url=oferta)],
+        [InlineKeyboardButton(
+            text=f"🔓 Оплатить подписку — {price} ₽ в месяц",
+            callback_data="subscribe"
+        )],
+        [InlineKeyboardButton(text="📄 Договор оферты", url=settings["oferta"])],
         [InlineKeyboardButton(text="ℹ️ Реквизиты", callback_data="pay_wall_requisites")],
     ]
 
     if SUPPORT_USERNAME:
         rows.append(
-            [
-                InlineKeyboardButton(
-                    text="💬 Поддержка",
-                    url=f"https://t.me/{SUPPORT_USERNAME}",
-                )
-            ]
+            [InlineKeyboardButton(
+                text="💬 Поддержка",
+                url=f"https://t.me/{SUPPORT_USERNAME}"
+            )]
         )
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def requisites_kb(settings: dict):
-    subscribe_url = settings["subscribe_url"]
+    price = settings["price"]
 
     rows = [
-        [
-            InlineKeyboardButton(
-                text=f"💳 Оплатить подписку — {settings['price']} ₽ в месяц",
-                url=subscribe_url,
-            )
-        ],
+        [InlineKeyboardButton(
+            text=f"💳 Оплатить подписку — {price} ₽ в месяц",
+            callback_data="subscribe"
+        )],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="paywall_back")],
     ]
 
     if SUPPORT_USERNAME:
         rows.append(
-            [
-                InlineKeyboardButton(
-                    text="💬 Поддержка",
-                    url=f"https://t.me/{SUPPORT_USERNAME}",
-                )
-            ]
+            [InlineKeyboardButton(
+                text="💬 Поддержка",
+                url=f"https://t.me/{SUPPORT_USERNAME}"
+            )]
         )
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -161,18 +153,12 @@ async def send_universal_paywall(msg_or_cb, reason: str, user_id: int, session_i
 
     if isinstance(msg_or_cb, types.CallbackQuery):
         await msg_or_cb.message.answer(
-            text,
-            reply_markup=kb,
-            parse_mode="Markdown",
-            disable_web_page_preview=True,
+            text, reply_markup=kb, parse_mode="Markdown", disable_web_page_preview=True
         )
         await msg_or_cb.answer()
     else:
         await msg_or_cb.answer(
-            text,
-            reply_markup=kb,
-            parse_mode="Markdown",
-            disable_web_page_preview=True,
+            text, reply_markup=kb, parse_mode="Markdown", disable_web_page_preview=True
         )
 
 
@@ -188,7 +174,7 @@ async def on_pay_requisites(cb: types.CallbackQuery):
         _requisites_text(settings),
         reply_markup=requisites_kb(settings),
         parse_mode="Markdown",
-        disable_web_page_preview=True,
+        disable_web_page_preview=True
     )
     await cb.answer()
 
@@ -201,6 +187,36 @@ async def on_paywall_back(cb: types.CallbackQuery):
         _paywall_text(settings),
         reply_markup=paywall_kb(settings, can_continue_l0=False),
         parse_mode="Markdown",
-        disable_web_page_preview=True,
+        disable_web_page_preview=True
+    )
+    await cb.answer()
+
+
+@paywall_router.callback_query(F.data == "subscribe")
+async def on_subscribe(cb: types.CallbackQuery):
+    """Генерим персональную ссылку Robokassa (Recurring + Receipt) и даём кнопку-URL."""
+    settings = get_paywall_settings()
+    price = float(settings["price"])
+    user_id = cb.from_user.id
+
+    log_event(user_id, "subscribe_click", {})
+
+    pay_url, inv_id = make_payment_link(
+        user_id=user_id,
+        amount_rub=price,
+        description="Подписка «Близкие игры», ежемесячно"
+    )
+
+    # клавиатура с URL-оплатой
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔓 Перейти к оплате", url=pay_url)],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="paywall_back")]
+        ]
+    )
+
+    await cb.message.answer(
+        "Откроется защищённая страница Robokassa.\nПосле оплаты вас вернёт в бота.",
+        reply_markup=kb
     )
     await cb.answer()

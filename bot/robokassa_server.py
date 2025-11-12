@@ -36,43 +36,61 @@ async def robokassa_result(request: Request):
 
     user_id = int(params.get("Shp_user"))
     inv_id = str(params.get("InvId"))
-    out_sum = float(params.get("OutSum", 0.0))
-    amount_cents = int(round(out_sum * 100))
+    out_sum_rub = float(params.get("OutSum", 0.0))
+    amount_cents = int(round(out_sum_rub * 100))
 
     now = datetime.now(timezone.utc)
     next_month = now + timedelta(days=30)
 
-    # 1️⃣ Записываем платёж
-    payment = {
-        "user_id": user_id,
-        "provider": "robokassa",
-        "kind": "subscription",
-        "amount_cents": amount_cents,
-        "currency": "RUB",
-        "status": "paid",
-        "external_id": inv_id,
-        "raw": params,
-        "paid_at": now.isoformat()
-    }
-    inserted = supabase.table("payments").insert(payment).execute()
-    payment_id = inserted.data[0]["id"] if inserted.data else None
+    # 1) upsert платежа по external_id (идемпотентно)
+    up = (
+        supabase.table("payments")
+        .upsert({
+            "user_id": user_id,
+            "provider": "robokassa",
+            "kind": "subscription",
+            "amount_cents": amount_cents,
+            "currency": "RUB",
+            "status": "paid",
+            "external_id": inv_id,
+            "raw": params,
+            "paid_at": now.isoformat(),
+        }, on_conflict="external_id")
+        .execute()
+    )
+    if up.data and len(up.data):
+        payment_id = up.data[0]["id"]
+    else:
+        # если upsert ничего не вернул — достанем id выборкой
+        sel = (
+            supabase.table("payments")
+            .select("id")
+            .eq("external_id", inv_id)
+            .maybe_single()
+            .execute()
+        )
+        payment_id = sel.data["id"]
 
-    # 2️⃣ Обновляем / создаём подписку
+    # 2) подписка пользователя
+    plan_name = rk.get("plan_name", "monthly")
+    auto_renew = True
+
     supabase.table("user_subscriptions").upsert({
         "user_id": user_id,
+        "plan_name": plan_name,
+        "auto_renew": auto_renew,
         "is_active": True,
         "renewed_at": now.isoformat(),
         "expires_at": next_month.isoformat(),
         "last_payment_id": payment_id,
-    }).execute()
+    }, on_conflict="user_id").execute()
 
-    # 3️⃣ Логируем в Amplitude
     log_event(user_id, "subscription_payment_received", {
         "invoice_id": inv_id,
         "amount_cents": amount_cents
     })
-
     print("✅ Payment processed OK", inv_id)
+
     return Response(f"OK{inv_id}", media_type="text/plain")
 
 def _html_back_to_bot(title: str, text: str, payload: str) -> str:
@@ -93,13 +111,21 @@ def _html_back_to_bot(title: str, text: str, payload: str) -> str:
 @app.get("/robokassa/success")
 async def robokassa_success(request: Request):
     inv_id = request.query_params.get("InvId", "")
-    html = _html_back_to_bot("Оплата успешно принята", "Секунду… проверяю статус подписки.", f"payment_ok_{inv_id}")
+    html = _html_back_to_bot(
+        "Оплата успешно принята",
+        "Секунду… проверяю статус подписки.",
+        f"payment_ok_{inv_id}"
+    )
     return HTMLResponse(content=html)
 
 @app.get("/robokassa/fail")
 async def robokassa_fail(request: Request):
     inv_id = request.query_params.get("InvId", "")
-    html = _html_back_to_bot("Оплата не завершена", "Если это ошибка — вернёмся в бот и попробуем ещё раз.", f"payment_fail_{inv_id}")
+    html = _html_back_to_bot(
+        "Оплата не завершена",
+        "Если это ошибка — вернёмся в бот и попробуем ещё раз.",
+        f"payment_fail_{inv_id}"
+    )
     return HTMLResponse(content=html)
 
 if __name__ == "__main__":
