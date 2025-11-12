@@ -4,9 +4,11 @@ from db.supabase_client import supabase
 from utils.robokassa import get_rk_settings
 from utils.amplitude_logger import log_event
 from datetime import datetime, timedelta, timezone
+from fastapi.responses import HTMLResponse
 
 app = FastAPI()
 
+BOT_USERNAME = "blizkie_igry_bot"
 
 # ============================================================
 #  ХЕЛПЕР: Верификация подписи RESULTURL
@@ -124,3 +126,41 @@ async def robokassa_result(request: Request):
     #   4. Ответ Robokassa (строго по документации!)
     # ========================================================
     return Response(f"OK{inv_id}", media_type="text/plain")
+
+def _html_back_to_bot(title: str, text: str, payload: str) -> str:
+    deeplink = f"https://t.me/{BOT_USERNAME}?start={payload}"
+    return f"""<!doctype html>
+<html><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{title}</title>
+<meta http-equiv="refresh" content="2;url={deeplink}">
+</head>
+<body style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:24px;">
+  <h2>{title}</h2>
+  <p>{text}</p>
+  <p><a href="{deeplink}">Вернуться в бота</a></p>
+</body></html>"""
+
+@app.get("/robokassa/success")
+async def robokassa_success(request: Request):
+    q = dict(request.query_params)
+    inv_id = q.get("InvId", "")
+    html = _html_back_to_bot(
+        "Оплата успешно принята",
+        "Секунду… возвращаю в бот и проверяю статус подписки.",
+        f"payment_ok_{inv_id}"
+    )
+    return HTMLResponse(content=html)
+
+@app.get("/robokassa/fail")
+async def robokassa_fail(request: Request):
+    q = dict(request.query_params)
+    inv_id = q.get("InvId", "")
+    html = _html_back_to_bot(
+        "Оплата не завершена",
+        "Если это ошибка — вернёмся в бот и попробуем ещё раз.",
+        f"payment_fail_{inv_id}"
+    )
+    return HTMLResponse(content=html)
+
