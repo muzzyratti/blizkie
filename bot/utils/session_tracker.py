@@ -9,9 +9,9 @@ from utils.paywall_guard import is_user_limited
 
 logger = setup_logger()
 
-# Тест: 1 мин закрытие. В проде верни 30.
-SESSION_TIMEOUT_MINUTES = 30
-SYNC_INTERVAL_SECONDS = 180
+# Тест: 1 мин и 30 сек. В проде верни 30 мин и 180 сек.
+SESSION_TIMEOUT_MINUTES = 1
+SYNC_INTERVAL_SECONDS = 30
 
 def _utcnow():
     return datetime.now(timezone.utc)

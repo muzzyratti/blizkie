@@ -210,32 +210,84 @@ def schedule_paywall_followup(user_id: int, *, reason: str | None = None):
         supabase.table("push_queue").insert(rows).execute()
         logger.info(f"[push_scheduler] ✅ Scheduled paywall_followup chain for user={user_id}")
 
-
-
-
 def schedule_premium_ritual(user_id: int):
     """
-    Ритуальный пуш по пятницам (упрощённо).
-    В тесте: через delays_test_seconds.premium_ritual секунд.
-    В проде: ближайшая пятница 12:00 локального (можешь потом скорректировать под свои часы).
+    КАЖДЫЙ ПЯТНИЧНЫЙ РИТУАЛ.
+    В проде – ближайшая пятница 11:00 локально.
+    В тесте – через delays_test_seconds.premium_ritual секунд.
     """
+
     cfg = get_flag("retention_policy", {}) or {}
     mode = (cfg.get("push_env") or {}).get("mode", "prod")
+
     now = _utcnow()
 
+    # ===== TEST MODE =====
     if mode == "test":
         sec = int((cfg.get("delays_test_seconds", {}) or {}).get("premium_ritual", 50))
         when = now + timedelta(seconds=sec)
-    else:
-        # ближайшая пятница 12:00 локального: берём сдвиг tz_offset_hours
-        tz_offset = int(cfg.get("tz_offset_hours", 3))
-        local_now = now + timedelta(hours=tz_offset)
-        weekday = local_now.weekday()  # 0=Mon ... 4=Fri
-        add_days = (4 - weekday) % 7
-        target_local = (
-            local_now.replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=add_days)
-        )
-        when = target_local - timedelta(hours=tz_offset)
 
-    _schedule_many(user_id, "premium_ritual", [when], payload={"weekly": True})
-    logger.info(f"[push_scheduler] ✅ Scheduled premium_ritual for user={user_id}")
+        # чистим старые
+        supabase.table("push_queue").delete()\
+            .eq("user_id", user_id)\
+            .eq("type", "premium_ritual")\
+            .eq("status", "pending")\
+            .execute()
+
+        supabase.table("push_queue").insert({
+            "user_id": user_id,
+            "type": "premium_ritual",
+            "status": "pending",
+            "scheduled_at": _iso(when),
+            "payload": {"weekly": True}
+        }).execute()
+
+        logger.info(f"[push_scheduler] (TEST) premium_ritual set for user={user_id}")
+        return
+
+    # ===== PROD MODE =====
+    # 1) Проверяем подписку
+    sub = (
+        supabase.table("user_subscriptions")
+        .select("is_active, expires_at")
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    ).data
+
+    if not sub or not sub.get("is_active"):
+        logger.info(f"[push_scheduler] No active subscription — skip premium_ritual user={user_id}")
+        return
+
+    # 2) Удаляем старые pending
+    supabase.table("push_queue").delete()\
+        .eq("user_id", user_id)\
+        .eq("type", "premium_ritual")\
+        .eq("status", "pending")\
+        .execute()
+
+    # 3) Расчёт ближайшей пятницы 11:00 локально
+    tz_offset = int(cfg.get("tz_offset_hours", 3))
+    local_now = now + timedelta(hours=tz_offset)
+
+    weekday = local_now.weekday()  # 0=Mon ... 4=Fri
+    add_days = (4 - weekday) % 7
+
+    target_local = (
+        local_now.replace(hour=11, minute=0, second=0, microsecond=0)
+        + timedelta(days=add_days)
+    )
+
+    target_utc = target_local - timedelta(hours=tz_offset)
+
+    # 4) Создаём новую задачу
+    supabase.table("push_queue").insert({
+        "user_id": user_id,
+        "type": "premium_ritual",
+        "status": "pending",
+        "scheduled_at": _iso(target_utc),
+        "payload": {"weekly": True},
+    }).execute()
+
+    logger.info(f"[push_scheduler] (PROD) premium_ritual scheduled {target_utc} user={user_id}")
+

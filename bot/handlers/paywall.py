@@ -1,5 +1,6 @@
 from aiogram import Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from utils.amplitude_logger import log_event
 from utils.push_scheduler import schedule_paywall_followup
 from utils.paywall_guard import l0_views_count, _rules
@@ -93,7 +94,7 @@ def paywall_kb(settings: dict, can_continue_l0: bool):
 
     rows = [
         [InlineKeyboardButton(
-            text=f"🔓 Оплатить подписку — {price} ₽ в месяц",
+            text=f"💳 Оплатить подписку — {price} ₽ в месяц",
             callback_data="subscribe"
         )],
         [InlineKeyboardButton(text="📄 Договор оферты", url=settings["oferta"])],
@@ -210,7 +211,7 @@ async def on_subscribe(cb: types.CallbackQuery):
     # клавиатура с URL-оплатой
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🔓 Перейти к оплате", url=pay_url)],
+            [InlineKeyboardButton(text="💳 Перейти к оплате", url=pay_url)],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="paywall_back")]
         ]
     )
@@ -219,3 +220,25 @@ async def on_subscribe(cb: types.CallbackQuery):
         "Откроется защищённая страница Robokassa.\nПосле оплаты вас вернёт в бота.",
         reply_markup=kb
     )
+
+@paywall_router.callback_query(F.data == "open_paywall_direct")
+async def open_paywall_direct(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+
+    # Генерируем ссылку Robokassa
+    link, inv_id = make_payment_link(
+        user_id=user_id,
+        amount_rub=490,
+        description="Подписка «Близкие Игры», ежемесячно"
+    )
+
+    text = (
+        "Откроется защищённая страница Robokassa.\n"
+        "После оплаты вас вернёт в бота."
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💳 Перейти к оплате", url=link)
+    markup = kb.as_markup()
+
+    await callback.message.edit_text(text, reply_markup=markup)
