@@ -1,13 +1,35 @@
 from db.supabase_client import supabase
 from db.feature_flags import get_flag
 
+try:
+    from db.user_status import is_premium_user as _is_premium_user
+except Exception:
+    _is_premium_user = None
+
+
 def is_premium(user_id: int) -> bool:
+    """
+    True если у пользователя есть платный доступ.
+    Приоритет:
+      1) db.user_status.is_premium_user (overrides + user_subscriptions c проверкой expires_at)
+      2) Fallback: прямой просмотр premium_overrides (как было раньше)
+    """
+    # 1) Основной путь — централизованная функция
+    if _is_premium_user:
+        try:
+            return bool(_is_premium_user(user_id))
+        except Exception as e:
+            print(f"[paywall_guard] fallback to overrides, user_status error: {e}")
+
+    # 2) Fallback (старое поведение)
     try:
-        r = (supabase.table("premium_overrides")
-             .select("is_premium")
-             .eq("user_id", user_id)
-             .limit(1)
-             .execute())
+        r = (
+            supabase.table("premium_overrides")
+            .select("is_premium")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
         rows = r.data or []
         return bool(rows and rows[0].get("is_premium"))
     except Exception as e:
