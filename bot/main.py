@@ -12,7 +12,8 @@ from handlers.update_filters import update_filters_router
 from handlers.feedback import feedback_router
 from handlers.feedback_activity import feedback_router as feedback_activity_router
 from handlers.subscribe import subscribe_router
-from handlers import donate
+from handlers.donate import donate_router
+from handlers.cancel_subscription import cancel_subscription_router
 from handlers.paywall import paywall_router
 from utils.session_tracker import sync_sessions_to_db
 from workers.worker_pushes import run_worker
@@ -30,6 +31,7 @@ async def set_bot_commands(bot):
         BotCommand(command="feedback", description="🧸 Поделиться мнением или ошибкой"),
         BotCommand(command="subscribe", description="📢 Подписаться на канал"),
         BotCommand(command="donate", description="💛 Поддержать проект"),
+        BotCommand(command="cancel_subscription", description="❌ Отменить подписку"),
     ]
     await bot.set_my_commands(commands)
 
@@ -49,10 +51,11 @@ async def main():
     dp.include_router(share_router)
     dp.include_router(update_filters_router)
     dp.include_router(feedback_router)
-    dp.include_router(feedback_activity_router)
     dp.include_router(subscribe_router)
-    dp.include_router(donate.router)
+    dp.include_router(donate_router)
+    dp.include_router(cancel_subscription_router)
     dp.include_router(paywall_router)
+    dp.include_router(feedback_activity_router)
 
     logger.info("Устанавливаем команды бота...")
     await set_bot_commands(bot)

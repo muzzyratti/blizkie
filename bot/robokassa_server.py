@@ -42,7 +42,6 @@ async def robokassa_result(request: Request):
     now = datetime.now(timezone.utc)
     next_month = now + timedelta(days=30)
 
-    # 1) upsert платежа по external_id (идемпотентно)
     up = (
         supabase.table("payments")
         .upsert({
@@ -61,7 +60,6 @@ async def robokassa_result(request: Request):
     if up.data and len(up.data):
         payment_id = up.data[0]["id"]
     else:
-        # если upsert ничего не вернул — достанем id выборкой
         sel = (
             supabase.table("payments")
             .select("id")
@@ -71,14 +69,11 @@ async def robokassa_result(request: Request):
         )
         payment_id = sel.data["id"]
 
-    # 2) подписка пользователя
     plan_name = rk.get("plan_name", "monthly")
-    auto_renew = True
-
     supabase.table("user_subscriptions").upsert({
         "user_id": user_id,
         "plan_name": plan_name,
-        "auto_renew": auto_renew,
+        "auto_renew": True,
         "is_active": True,
         "renewed_at": now.isoformat(),
         "expires_at": next_month.isoformat(),
@@ -90,6 +85,15 @@ async def robokassa_result(request: Request):
         "amount_cents": amount_cents
     })
     print("✅ Payment processed OK", inv_id)
+
+    # моментальный пуш: кладём задачу в очередь
+    supabase.table("push_queue").insert({
+        "user_id": user_id,
+        "type": "premium_welcome",
+        "status": "pending",
+        "scheduled_at": now.isoformat(),
+        "payload": {"amount_rub": out_sum_rub}
+    }).execute()
 
     return Response(f"OK{inv_id}", media_type="text/plain")
 

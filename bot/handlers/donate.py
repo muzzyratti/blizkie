@@ -1,12 +1,15 @@
-from aiogram import Router, types
+from aiogram import Router, types, F
 from aiogram.filters import Command
 
-router = Router()
+donate_router = Router()
 
-@router.message(Command("donate"))
+@donate_router.message(Command("donate"))
 async def donate_command(message: types.Message):
     await message.answer(
-        "Проект создаётся с любовью и энтузиазмом, чтобы дарить вам тёплые моменты с детьми. 💛\n\n"
-        "Если хочется поддержать — вот ссылка на тёплый жест:\n"
+        "🙏 Проект делаем с любовью. Если хочешь поддержать — вот ссылка:\n"
         "https://www.donationalerts.com/r/alexklop"
     )
+
+@donate_router.message(F.text == "/donate")
+async def donate_text(message: types.Message):
+    await donate_command(message)

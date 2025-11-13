@@ -1,5 +1,5 @@
 from aiogram import Router, types, F
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from utils.amplitude_logger import log_event
 from utils.push_scheduler import schedule_paywall_followup
 from utils.paywall_guard import l0_views_count, _rules
@@ -219,4 +219,3 @@ async def on_subscribe(cb: types.CallbackQuery):
         "Откроется защищённая страница Robokassa.\nПосле оплаты вас вернёт в бота.",
         reply_markup=kb
     )
-    await cb.answer()

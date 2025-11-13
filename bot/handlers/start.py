@@ -11,6 +11,7 @@ router = Router()
 
 
 @router.message(CommandStart())
+
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
 
