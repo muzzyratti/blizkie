@@ -43,8 +43,7 @@ async def robokassa_result(request: Request):
     next_month = now + timedelta(days=30)
 
     up = (
-        supabase.table("payments")
-        .upsert({
+        supabase.table("payments").upsert({
             "user_id": user_id,
             "provider": "robokassa",
             "kind": "subscription",
@@ -54,8 +53,7 @@ async def robokassa_result(request: Request):
             "external_id": inv_id,
             "raw": params,
             "paid_at": now.isoformat(),
-        }, on_conflict="external_id")
-        .execute()
+        }, on_conflict="provider,external_id").execute()
     )
     if up.data and len(up.data):
         payment_id = up.data[0]["id"]
