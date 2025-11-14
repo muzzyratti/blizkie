@@ -86,22 +86,37 @@ async def _process_push(row: dict, cfg: dict, bot):
 
     now = _utcnow()
 
+    # ===== TEST MODE FOR PREMIUM RITUAL =====
+    test_cfg = get_flag("premium_ritual_test", {}) or {}
+    test_user = int(test_cfg.get("user_id", 0))
+    interval = int(test_cfg.get("interval_sec", 0))
+
+    if push_type == "premium_ritual" and test_user == user_id and interval > 0:
+        logger.info(f"[push_worker] TEST premium_ritual bypass for user={user_id}")
+
+        next_when = now + timedelta(seconds=interval)
+        supabase.table("push_queue").insert({
+            "user_id": user_id,
+            "type": "premium_ritual",
+            "status": "pending",
+            "scheduled_at": _iso(next_when),
+            "payload": {"weekly": False, "test": True},
+        }).execute()
+
     # ----- Premium welcome bypass -----
     if push_type == "premium_welcome":
         logger.info(f"[push_worker] premium_welcome — bypass all limits for push_id={push_id}")
     else:
-        # Quiet hours
         if _in_quiet_hours(now, cfg):
             logger.info(f"[push_worker] Quiet hours — skip push_id={push_id}")
             return
 
-        # Global cap
         cap = int(cfg.get("global_daily_cap", 100))
         if _global_cap_reached(now, cap):
             logger.warning(f"[push_worker] Daily cap reached — skip push_id={push_id}")
             return
 
-    markup = None  # может быть создан ниже
+    markup = None
 
     # Формируем текст
     if push_type == "retention_nudge":
@@ -115,7 +130,6 @@ async def _process_push(row: dict, cfg: dict, bot):
         else:
             text = "Если захочешь — я всегда рядом. Подбросить идею для спокойного вечера?"
 
-        # Кнопка для возвращения в подбор идей
         kb = InlineKeyboardBuilder()
         kb.button(text="✨ Давай подберём идею!", callback_data="start_onboarding")
         markup = kb.as_markup()
@@ -133,25 +147,22 @@ async def _process_push(row: dict, cfg: dict, bot):
         else:
             text = "Хотите открыть больше идей? Просто оплатите подписку."
 
-        # Кнопки — как в paywall
         rk = get_flag("robokassa_keys", {})
         price = rk.get("price_rub", 490)
-        
+
         kb = InlineKeyboardBuilder()
         kb.row(InlineKeyboardButton(text=f"💳 Оплатить подписку — {price} ₽", callback_data="open_paywall_direct"))
         kb.row(InlineKeyboardButton(text="Поддержка", url="https://t.me/discoklopkov"))
         markup = kb.as_markup()
 
     elif push_type == "premium_ritual":
-        # Новый красивый текст
         text = (
-            "🌿 Привычка от Близких Игр.\n\n"
-            "Выходные рядом — отличный момент выбрать тёплую игру, "
+            "🎉 Выходные рядом!\n\n"
+            "Это лучшее время чтобы выбрать тёплую игру, "
             "которая подарит вам с ребёнком кусочек близости и радости.\n\n"
             "Готовы подобрать что-то особенное?"
         )
 
-        # Кнопка
         kb = InlineKeyboardBuilder()
         kb.button(text="✨ Давай подберём идею!", callback_data="start_onboarding")
         markup = kb.as_markup()
@@ -176,10 +187,10 @@ async def _process_push(row: dict, cfg: dict, bot):
                 7:"июля",8:"августа",9:"сентября",10:"октября",11:"ноября",12:"декабря"
             }
             formatted_exp = f"{dt.day} {months[dt.month]} {dt.year} {dt.strftime('%H:%M:%S')} UTC"
-            exp_line = f"\n\nПодписка продлена до *{formatted_exp}*"
+            exp_line = f"\n\nПодписка продлена до {formatted_exp}"
         else:
             exp_line = ""
-        
+
         text = (
             f"🎉 Подписка активирована!\n"
             f"Полный доступ к идеям открыт. Спасибо за поддержку ❤️\n"
@@ -194,7 +205,7 @@ async def _process_push(row: dict, cfg: dict, bot):
     else:
         text = "Бот Близких Игр тут. Хотите идей для тёплого вечера? Нажмите /start."
 
-    # Отправка
+    # ----- ОТПРАВКА -----
     try:
         if markup:
             await bot.send_message(user_id, text, reply_markup=markup)
@@ -208,6 +219,15 @@ async def _process_push(row: dict, cfg: dict, bot):
 
         logger.info(f"[push_worker] ✅ Sent push_id={push_id} user={user_id}")
 
+        # Планируем следующий ritual ТОЛЬКО если это premium_ritual
+        if push_type == "premium_ritual":
+            try:
+                from utils.push_scheduler import schedule_premium_ritual
+                schedule_premium_ritual(user_id)
+                logger.info(f"[push_worker] ⏭ Planned next premium_ritual for user={user_id}")
+            except Exception as e:
+                logger.warning(f"[push_worker] Failed to schedule next premium_ritual user={user_id}: {e}")
+
     except Exception as e:
         logger.warning(f"[push_worker] ❌ Failed push_id={push_id}: {e}")
 
@@ -215,6 +235,7 @@ async def _process_push(row: dict, cfg: dict, bot):
             "status": "failed",
             "sent_at": _iso(now)
         }).eq("id", push_id).execute()
+
 
 
 # ==============================
@@ -232,7 +253,6 @@ async def run_worker(bot):
     while True:
         now = time.time()
 
-        # обновляем флаги
         if cfg_cache is None or now - last_flags_load > 60:
             try:
                 cfg_cache = get_flag("retention_policy", {})
@@ -240,7 +260,6 @@ async def run_worker(bot):
             except Exception as e:
                 logger.warning(f"[push_worker] Failed to load retention_policy: {e}")
 
-        # чек очереди
         try:
             pending = (
                 supabase.table("push_queue")

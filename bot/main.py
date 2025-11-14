@@ -19,6 +19,10 @@ from utils.session_tracker import sync_sessions_to_db
 from workers.worker_pushes import run_worker
 from middleware.activity_middleware import ActivityMiddleware
 
+# === ДОБАВЛЕНО: импорт для восстановления weekly пушей ===
+from utils.push_scheduler import schedule_premium_ritual
+from db.supabase_client import supabase
+
 logger = setup_logger()
 
 
@@ -36,13 +40,39 @@ async def set_bot_commands(bot):
     await bot.set_my_commands(commands)
 
 
+# === ДОБАВЛЕНО: функция восстановления weekly пушей ===
+async def restore_all_premium_rituals():
+    """
+    При запуске бота восстанавливаем weekly-пуши для всех активных подписчиков.
+    schedule_premium_ritual сам удаляет старые pending и ставит новые.
+    """
+    try:
+        rows = (
+            supabase.table("user_subscriptions")
+            .select("user_id, is_active")
+            .eq("is_active", True)
+            .execute()
+        ).data or []
+
+        for row in rows:
+            uid = row["user_id"]
+            try:
+                schedule_premium_ritual(uid)
+                logger.info(f"🔁 Restored weekly ritual for user={uid}")
+            except Exception as e:
+                logger.warning(f"❌ Failed restoring ritual for user={uid}: {e}")
+
+    except Exception as e:
+        logger.warning(f"❌ Failed to load active subscriptions: {e}")
+
+
 async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
     dp.message.middleware(ActivityMiddleware())
     dp.callback_query.middleware(ActivityMiddleware())
-    
+
     # --- подключаем все роутеры
     dp.include_router(start.router)
     dp.include_router(onboarding_router)
@@ -62,9 +92,12 @@ async def main():
 
     logger.info("Бот запускается...")
 
+    # === ДОБАВЛЕНО: восстановление weekly-пушей ===
+    asyncio.create_task(restore_all_premium_rituals())
+
     asyncio.create_task(sync_sessions_to_db())
     asyncio.create_task(run_worker(bot))  # фоновый push-воркер
-    
+
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 

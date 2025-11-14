@@ -213,7 +213,7 @@ def schedule_paywall_followup(user_id: int, *, reason: str | None = None):
 def schedule_premium_ritual(user_id: int):
     """
     КАЖДЫЙ ПЯТНИЧНЫЙ РИТУАЛ.
-    В проде – ближайшая пятница 11:00 локально.
+    В проде – ближайшая пятница 13:00 локально.
     В тесте – через delays_test_seconds.premium_ritual секунд.
     """
 
@@ -266,7 +266,7 @@ def schedule_premium_ritual(user_id: int):
         .eq("status", "pending")\
         .execute()
 
-    # 3) Расчёт ближайшей пятницы 11:00 локально
+    # 3) Ближайшая пятница 13:00 локально
     tz_offset = int(cfg.get("tz_offset_hours", 3))
     local_now = now + timedelta(hours=tz_offset)
 
@@ -274,13 +274,16 @@ def schedule_premium_ritual(user_id: int):
     add_days = (4 - weekday) % 7
 
     target_local = (
-        local_now.replace(hour=11, minute=0, second=0, microsecond=0)
+        local_now.replace(hour=13, minute=0, second=0, microsecond=0)
         + timedelta(days=add_days)
     )
 
+    # если уже после 13:00 — переносим на следующую неделю
+    if target_local <= local_now:
+        target_local += timedelta(days=7)
+
     target_utc = target_local - timedelta(hours=tz_offset)
 
-    # 4) Создаём новую задачу
     supabase.table("push_queue").insert({
         "user_id": user_id,
         "type": "premium_ritual",
@@ -289,5 +292,6 @@ def schedule_premium_ritual(user_id: int):
         "payload": {"weekly": True},
     }).execute()
 
-    logger.info(f"[push_scheduler] (PROD) premium_ritual scheduled {target_utc} user={user_id}")
-
+    logger.info(
+        f"[push_scheduler] (PROD) premium_ritual scheduled {target_utc} user={user_id}"
+    )

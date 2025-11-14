@@ -5,6 +5,7 @@ from utils.robokassa import get_rk_settings
 from utils.amplitude_logger import log_event
 from datetime import datetime, timedelta, timezone
 import hashlib
+from utils.push_scheduler import schedule_premium_ritual
 
 app = FastAPI()
 BOT_USERNAME = "blizkie_igry_bot"
@@ -20,6 +21,7 @@ def verify_signature(params: dict, password2: str) -> bool:
     calc = hashlib.md5(raw.encode()).hexdigest().upper()
     recv = params.get("SignatureValue", "").upper()
     return calc == recv
+
 
 @app.post("/robokassa/result")
 async def robokassa_result(request: Request):
@@ -42,6 +44,7 @@ async def robokassa_result(request: Request):
     now = datetime.now(timezone.utc)
     next_month = now + timedelta(days=30)
 
+    # СОХРАНЯЕМ ПЛАТЁЖ
     up = (
         supabase.table("payments").upsert({
             "user_id": user_id,
@@ -67,6 +70,7 @@ async def robokassa_result(request: Request):
         )
         payment_id = sel.data["id"]
 
+    # ОБНОВЛЯЕМ ПОДПИСКУ
     plan_name = rk.get("plan_name", "monthly")
     supabase.table("user_subscriptions").upsert({
         "user_id": user_id,
@@ -84,7 +88,7 @@ async def robokassa_result(request: Request):
     })
     print("✅ Payment processed OK", inv_id)
 
-    # моментальный пуш: кладём задачу в очередь
+    # МГНОВЕННЫЙ ПРИВЕТСТВЕННЫЙ ПУШ
     supabase.table("push_queue").insert({
         "user_id": user_id,
         "type": "premium_welcome",
@@ -93,7 +97,15 @@ async def robokassa_result(request: Request):
         "payload": {"amount_rub": out_sum_rub}
     }).execute()
 
+    # <<< ДОБАВЛЯЕМ СЮДА: ПОСТАНОВКА WEEKLY PREMIUM RITUAL >>>
+    try:
+        schedule_premium_ritual(user_id)
+        print("🟢 Scheduled weekly premium_ritual for user:", user_id)
+    except Exception as e:
+        print("❌ Failed to schedule premium_ritual:", e)
+
     return Response(f"OK{inv_id}", media_type="text/plain")
+
 
 def _html_back_to_bot(title: str, text: str, payload: str) -> str:
     deeplink = f"https://t.me/{BOT_USERNAME}?start={payload}"
@@ -110,6 +122,7 @@ def _html_back_to_bot(title: str, text: str, payload: str) -> str:
   <p><a href="{deeplink}">Вернуться в бота</a></p>
 </body></html>"""
 
+
 @app.get("/robokassa/success")
 async def robokassa_success(request: Request):
     inv_id = request.query_params.get("InvId", "")
@@ -120,6 +133,7 @@ async def robokassa_success(request: Request):
     )
     return HTMLResponse(content=html)
 
+
 @app.get("/robokassa/fail")
 async def robokassa_fail(request: Request):
     inv_id = request.query_params.get("InvId", "")
@@ -129,6 +143,7 @@ async def robokassa_fail(request: Request):
         f"payment_fail_{inv_id}"
     )
     return HTMLResponse(content=html)
+
 
 if __name__ == "__main__":
     import uvicorn

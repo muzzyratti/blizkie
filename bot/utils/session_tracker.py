@@ -71,10 +71,16 @@ def touch_user_activity(user_id: int, *, source: str | None = None, device_info:
         ctx["device_info"] = device_info
 
     try:
-        clear_pending_pushes_for_user(user_id)
-        logger.info(f"[session] 🧹 Cleared pending pushes on revive user={user_id}")
+        supabase.table("push_queue") \
+            .delete() \
+            .eq("user_id", user_id) \
+            .eq("status", "pending") \
+            .neq("type", "premium_ritual") \
+            .execute()
+
+        logger.info(f"[session] 🧹 Cleared pending pushes except premium_ritual user={user_id}")
     except Exception as e:
-        logger.warning(f"[session] ⚠️ Clear pending on revive failed user={user_id}: {e}")
+        logger.warning(f"[session] ⚠️ Clear pending pushes failed user={user_id}: {e}")
 
     logger.info(f"[session] 🆕 New session created for user={user_id}")
 
