@@ -86,16 +86,20 @@ async def _process_push(row: dict, cfg: dict, bot):
 
     now = _utcnow()
 
-    # Quiet hours
-    if _in_quiet_hours(now, cfg):
-        logger.info(f"[push_worker] Quiet hours — skip push_id={push_id}")
-        return
+    # ----- Premium welcome bypass -----
+    if push_type == "premium_welcome":
+        logger.info(f"[push_worker] premium_welcome — bypass all limits for push_id={push_id}")
+    else:
+        # Quiet hours
+        if _in_quiet_hours(now, cfg):
+            logger.info(f"[push_worker] Quiet hours — skip push_id={push_id}")
+            return
 
-    # Global cap
-    cap = int(cfg.get("global_daily_cap", 100))
-    if _global_cap_reached(now, cap):
-        logger.warning(f"[push_worker] Daily cap reached — skip push_id={push_id}")
-        return
+        # Global cap
+        cap = int(cfg.get("global_daily_cap", 100))
+        if _global_cap_reached(now, cap):
+            logger.warning(f"[push_worker] Daily cap reached — skip push_id={push_id}")
+            return
 
     markup = None  # может быть создан ниже
 
@@ -154,10 +158,33 @@ async def _process_push(row: dict, cfg: dict, bot):
 
     elif push_type == "premium_welcome":
         amount = payload.get("amount_rub")
+
+        sub = (
+            supabase.table("user_subscriptions")
+            .select("expires_at")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        ).data
+
+        expires_at_iso = sub.get("expires_at") if sub else None
+
+        if expires_at_iso:
+            dt = datetime.fromisoformat(expires_at_iso.replace("Z", "+00:00"))
+            months = {
+                1:"января",2:"февраля",3:"марта",4:"апреля",5:"мая",6:"июня",
+                7:"июля",8:"августа",9:"сентября",10:"октября",11:"ноября",12:"декабря"
+            }
+            formatted_exp = f"{dt.day} {months[dt.month]} {dt.year} {dt.strftime('%H:%M:%S')} UTC"
+            exp_line = f"\n\nПодписка продлена до *{formatted_exp}*"
+        else:
+            exp_line = ""
+        
         text = (
             f"🎉 Подписка активирована!\n"
             f"Полный доступ к идеям открыт. Спасибо за поддержку ❤️\n"
-            f"Оплата в {amount} ₽ подтверждена."
+            f"Получен платёж на сумму {amount} ₽"
+            f"{exp_line}"
         )
 
         kb = InlineKeyboardBuilder()
