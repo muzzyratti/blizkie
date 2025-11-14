@@ -295,3 +295,77 @@ def schedule_premium_ritual(user_id: int):
     logger.info(
         f"[push_scheduler] (PROD) premium_ritual scheduled {target_utc} user={user_id}"
     )
+
+def schedule_retention_nudges_subscribers(user_id: int):
+    """
+    Цепочка для платных подписчиков.
+    PROD:
+      по умолчанию 2 и 10 дней (48 и 240 часов).
+      можно переопределить retention_policy.subscriber_nudge_delays_hours.
+    TEST:
+      интервалы как у retention_nudge через delays_test_seconds.retention_nudge.
+    """
+
+    # не дублируем цепочку
+    existing = (
+        supabase.table("push_queue")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("type", "retention_nudge_subscribers")
+        .eq("status", "pending")
+        .execute()
+    )
+    if existing.data:
+        logger.info(f"[push_scheduler] ⚠️ Subscriber retention chain exists, skip user={user_id}")
+        return
+
+    cfg = get_flag("retention_policy", {}) or {}
+
+    defaults = {
+        "push_env": {"mode": "prod"},
+        # 48ч (2 дня) и 240ч (10 дней)
+        "subscriber_nudge_delays_hours": [48, 240],
+    }
+    for k, v in defaults.items():
+        cfg.setdefault(k, v)
+
+    mode = (cfg.get("push_env") or {}).get("mode", "prod")
+    now = _utcnow()
+    rows = []
+
+    if mode == "test":
+        # в тесте просто берём ту же схему, что и для retention_nudge
+        offsets_sec = _accumulate_seconds(cfg, test_key="retention_nudge_subscribers")
+        for i, sec in enumerate(offsets_sec, start=1):
+            when = now + timedelta(seconds=int(sec))
+            rows.append(
+                {
+                    "user_id": user_id,
+                    "type": "retention_nudge_subscribers",
+                    "payload": {"step": i},
+                    "scheduled_at": _iso(when),
+                    "status": "pending",
+                }
+            )
+    else:
+        hours = cfg.get("subscriber_nudge_delays_hours") or [48, 240]
+        acc_h = 0
+        for i, h in enumerate(hours, start=1):
+            try:
+                acc_h += int(h)
+            except Exception:
+                continue
+            when = now + timedelta(hours=acc_h)
+            rows.append(
+                {
+                    "user_id": user_id,
+                    "type": "retention_nudge_subscribers",
+                    "payload": {"step": i},
+                    "scheduled_at": _iso(when),
+                    "status": "pending",
+                }
+            )
+
+    if rows:
+        supabase.table("push_queue").insert(rows).execute()
+        logger.info(f"[push_scheduler] ✅ Scheduled retention_nudge_subscribers chain for user={user_id}")

@@ -4,8 +4,13 @@ from datetime import datetime, timedelta, timezone
 from db.supabase_client import supabase
 from handlers.user_state import user_data
 from utils.logger import setup_logger
-from utils.push_scheduler import schedule_retention_nudges, schedule_paywall_followup, clear_pending_pushes_for_user
-from utils.paywall_guard import is_user_limited
+from utils.push_scheduler import (
+    schedule_retention_nudges,
+    schedule_paywall_followup,
+    schedule_retention_nudges_subscribers,
+)
+
+from utils.paywall_guard import is_user_limited, is_premium
 
 logger = setup_logger()
 
@@ -170,15 +175,26 @@ async def sync_sessions_to_db():
 
                 if inactive:
                     try:
+                        # 1) Бесплатный, который УПЁРСЯ в лимит → paywall follow-up
                         if is_user_limited(user_id):
                             reason = ctx.get("last_paywall_reason") or "session_end"
                             schedule_paywall_followup(user_id, reason=reason)
                             logger.info(f"[session_tracker] 📬 Paywall-followup scheduled for user={user_id}")
+
                         else:
-                            schedule_retention_nudges(user_id)
-                            logger.info(f"[session_tracker] 📬 Retention-nudges scheduled for user={user_id}")
+                            # 2) Лимит НЕ достигнут — различаем премиум / не премиум
+                            if is_premium(user_id):
+                                # Новая редкая цепочка для подписчиков
+                                schedule_retention_nudges_subscribers(user_id)
+                                logger.info(f"[session_tracker] 📬 Retention-nudges SUBSCRIBERS scheduled for user={user_id}")
+                            else:
+                                # Бесплатный, который не достиг лимита
+                                schedule_retention_nudges(user_id)
+                                logger.info(f"[session_tracker] 📬 Retention-nudges scheduled for user={user_id}")
+
                     except Exception as e:
                         logger.warning(f"[session_tracker] ❌ Push schedule error user={user_id}: {e}")
+
                     ctx["marked_ended"] = True
 
             logger.info(f"[session_tracker] ✅ Synced sessions (active={active_count}, closed={closed_count})")
