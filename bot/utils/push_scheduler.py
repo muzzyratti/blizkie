@@ -369,3 +369,79 @@ def schedule_retention_nudges_subscribers(user_id: int):
     if rows:
         supabase.table("push_queue").insert(rows).execute()
         logger.info(f"[push_scheduler] ✅ Scheduled retention_nudge_subscribers chain for user={user_id}")
+
+def schedule_interview_invite(user_id: int):
+    """
+    Однократный пуш-приглашение на интервью для премиум-юзера.
+
+    Условия:
+      - включён feature_flag "interview_invite"
+      - у пользователя не было такого пуша раньше (ни pending, ни sent)
+      - в таблице user_sessions у пользователя >= min_sessions (по флагу, дефолт 3)
+      - опционально: есть хотя бы 1 просмотр L1 (seen_activities.level='l1')
+    """
+    cfg = get_flag("interview_invite", {}) or {}
+    if not cfg.get("enabled", False):
+        logger.info(f"[push_scheduler] interview_invite disabled for user={user_id}")
+        return
+
+    # 1) Уже есть такой пуш? (pending или sent) — не дублируем
+    existing = (
+        supabase.table("push_queue")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("type", "interview_invite")
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        logger.info(f"[push_scheduler] interview_invite already exists for user={user_id}")
+        return
+
+    # 2) Кол-во сессий
+    min_sessions = int(cfg.get("min_sessions", 3))
+    sessions_res = (
+        supabase.table("user_sessions")
+        .select("session_id", count="exact")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    total_sessions = int(sessions_res.count or 0)
+    if total_sessions < min_sessions:
+        logger.info(
+            f"[push_scheduler] interview_invite skip user={user_id}, "
+            f"sessions={total_sessions}, need>={min_sessions}"
+        )
+        return
+
+    # 3) Минимум одна L1-карточка (если это требуется флагом)
+    require_l1 = bool(cfg.get("require_l1", True))
+    if require_l1:
+        seen_res = (
+            supabase.table("seen_activities")
+            .select("activity_id", count="exact")
+            .eq("user_id", user_id)
+            .eq("level", "l1")
+            .execute()
+        )
+        l1_count = int(seen_res.count or 0)
+        if l1_count == 0:
+            logger.info(
+                f"[push_scheduler] interview_invite skip user={user_id}, "
+                f"no L1 views"
+            )
+            return
+
+    # 4) Ставим пуш "на сейчас"
+    now = _utcnow()
+    supabase.table("push_queue").insert({
+        "user_id": user_id,
+        "type": "interview_invite",
+        "status": "pending",
+        "scheduled_at": _iso(now),
+        "payload": {
+            "photo_url": "https://hcfnytsjrqtwstyivnrx.supabase.co/storage/v1/object/public/push_assets/interview_invite_1.jpeg"
+        },
+    }).execute()
+
+    logger.info(f"[push_scheduler] ✅ interview_invite scheduled for user={user_id}")

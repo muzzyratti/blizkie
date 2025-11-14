@@ -8,6 +8,7 @@ from utils.push_scheduler import (
     schedule_retention_nudges,
     schedule_paywall_followup,
     schedule_retention_nudges_subscribers,
+    schedule_interview_invite,
 )
 
 from utils.paywall_guard import is_user_limited, is_premium
@@ -187,6 +188,10 @@ async def sync_sessions_to_db():
                                 # Новая редкая цепочка для подписчиков
                                 schedule_retention_nudges_subscribers(user_id)
                                 logger.info(f"[session_tracker] 📬 Retention-nudges SUBSCRIBERS scheduled for user={user_id}")
+                                try:
+                                    schedule_interview_invite(user_id)
+                                except Exception as e:
+                                    logger.error(f"[session_tracker] interview_invite error for user={user_id}: {e}")
                             else:
                                 # Бесплатный, который не достиг лимита
                                 schedule_retention_nudges(user_id)

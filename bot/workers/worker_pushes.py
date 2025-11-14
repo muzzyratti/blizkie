@@ -8,7 +8,7 @@ from db.feature_flags import get_flag
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
 from db.feature_flags import get_flag
-
+from utils.amplitude_logger import log_event
 
 logger = setup_logger()
 
@@ -137,18 +137,15 @@ async def _process_push(row: dict, cfg: dict, bot):
     elif push_type == "retention_nudge_subscribers":
         step = payload.get("step")
 
-        # Через 2 дня
         if step == 1:
             text = "Сегодня идеальный день, чтобы добавить немного близости. Найдём новую игру на вечер с ребёнком?"
-
-        # Через 10 дней
         else:
             text = "Подберем быстро тёплую идею, чтобы вы провели с ребёнком пару минут вместе?"
 
         kb = InlineKeyboardBuilder()
         kb.button(text="✨ Давай подберём идею!", callback_data="start_onboarding")
         markup = kb.as_markup()
-    
+
     elif push_type == "paywall_followup":
         step = payload.get("step")
         if step == 1:
@@ -216,11 +213,84 @@ async def _process_push(row: dict, cfg: dict, bot):
         kb = InlineKeyboardBuilder()
         kb.button(text="✨ Давай подберём идею!", callback_data="start_onboarding")
         markup = kb.as_markup()
-    
+
+    # ================================
+    # НОВЫЙ ПУШ — INTERVIEW INVITE
+    # ================================
+    elif push_type == "interview_invite":
+        try:
+            text = (
+                "Привет! Это Саша, создатель «Близких игр» 😊\n\n"
+                "Вижу, что ты активно пользуешься ботом — спасибо, это очень вдохновляет.\n"
+                "Хочу попросить тебя о небольшой помощи.\n\n"
+                "Давай созвонимся на 10–15 минут? Хочу услышать, что тебе нравится, "
+                "что можно улучшить и какие идеи появились.\n\n"
+                "Если ок — нажми кнопку ниже и напиши мне 🙌"
+            )
+
+            photo_url = payload.get("photo_url")
+
+            kb = InlineKeyboardBuilder()
+            kb.row(
+                InlineKeyboardButton(
+                    text="💬 Написать Саше",
+                    url="https://t.me/discoklopkov"
+                )
+            )
+            markup = kb.as_markup()
+
+            if photo_url:
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=photo_url,
+                    caption=text,
+                    reply_markup=markup,
+                    parse_mode="HTML"
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    reply_markup=markup,
+                    parse_mode="HTML"
+                )
+
+            supabase.table("push_queue").update({
+                "status": "sent",
+                "sent_at": _iso(now)
+            }).eq("id", push_id).execute()
+
+            logger.info(f"[push_worker] ✅ Sent interview_invite push_id={push_id} user={user_id}")
+
+            # --- Amplitude event ---
+            try:
+                log_event(
+                    user_id=user_id,
+                    event_name="push_interview_invite_sent",
+                    event_properties={
+                        "push_id": push_id,
+                        "photo_url": payload.get("photo_url"),
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"[push_worker] ⚠️ Failed to send Amplitude event for interview_invite user={user_id}: {e}")
+
+            return
+
+        except Exception as e:
+            logger.warning(f"[push_worker] ❌ Failed interview_invite push_id={push_id}: {e}")
+
+            supabase.table("push_queue").update({
+                "status": "failed",
+                "sent_at": _iso(now)
+            }).eq("id", push_id).execute()
+
+            return
+
     else:
         text = "Бот Близких Игр тут. Хотите идей для тёплого вечера? Нажмите /start."
 
-    # ----- ОТПРАВКА -----
+    # ----- ОТПРАВКА (ДЛЯ ВСЕХ ОСТАЛЬНЫХ ПУШЕЙ) -----
     try:
         if markup:
             await bot.send_message(user_id, text, reply_markup=markup)
@@ -234,7 +304,6 @@ async def _process_push(row: dict, cfg: dict, bot):
 
         logger.info(f"[push_worker] ✅ Sent push_id={push_id} user={user_id}")
 
-        # Планируем следующий ritual ТОЛЬКО если это premium_ritual
         if push_type == "premium_ritual":
             try:
                 from utils.push_scheduler import schedule_premium_ritual
@@ -252,16 +321,11 @@ async def _process_push(row: dict, cfg: dict, bot):
         }).eq("id", push_id).execute()
 
 
-
 # ==============================
 # ФОНОВЫЙ ВОРКЕР
 # ==============================
 
 async def run_worker(bot):
-    """
-    bot — передаётся извне!
-    """
-
     last_flags_load = 0
     cfg_cache = None
 
