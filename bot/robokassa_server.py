@@ -21,7 +21,7 @@ def verify_signature(params: dict, password2: str) -> bool:
     - НЕ меняет формат суммы (используем строку как есть!)
     """
 
-    # 1. Достаём сумму
+    # 1. Достаём сумму (строка как есть)
     out_sum_raw = (
         params.get("OutSum")
         or params.get("out_summ")
@@ -29,12 +29,12 @@ def verify_signature(params: dict, password2: str) -> bool:
         or params.get("outsum")
     )
     if out_sum_raw is None:
+        print("🔴 verify_signature: no OutSum/out_summ in params")
         return False
 
-    # Берём строку как есть, без float/format
     out_sum = str(out_sum_raw).strip()
 
-    # 2. Достаём ID счета
+    # 2. Достаём ID счета (строка как есть)
     inv_id_raw = (
         params.get("InvId")
         or params.get("inv_id")
@@ -42,28 +42,36 @@ def verify_signature(params: dict, password2: str) -> bool:
         or params.get("invoice_id")
     )
     if inv_id_raw is None:
+        print("🔴 verify_signature: no InvId/inv_id in params")
         return False
 
     inv_id = str(inv_id_raw).strip()
 
-    # 3. Достаём подпись
+    # 3. Достаём подпись из Robokassa
     recv_sig = (
         params.get("SignatureValue")
         or params.get("signaturevalue")
         or params.get("signature")
         or params.get("crc")
         or ""
-    ).upper()
-
+    )
     if not recv_sig:
+        print("🔴 verify_signature: no SignatureValue/crc in params")
         return False
 
-    # 4. Формируем raw-строку для проверки
-    # MD5(OutSum:InvId:Password2)
+    recv_sig_up = str(recv_sig).upper()
+
+    # 4. Формируем raw-строку для проверки: MD5(OutSum:InvId:Password2)
     raw = f"{out_sum}:{inv_id}:{password2}"
     calc = hashlib.md5(raw.encode()).hexdigest().upper()
 
-    return calc == recv_sig
+    # Лог для дебага
+    print("🧩 verify_signature debug:")
+    print("   raw      =", raw)
+    print("   calc_sig =", calc)
+    print("   recv_sig =", recv_sig_up)
+
+    return calc == recv_sig_up
 
 
 @app.post("/robokassa/result")
@@ -73,21 +81,21 @@ async def robokassa_result(request: Request):
 
     params: dict = {}
 
-    # 1) form-data / x-www-form-urlencoded (классический случай)
+    # 1) form-data / x-www-form-urlencoded
     try:
         form = await request.form()
         params = dict(form.items())
     except Exception:
         params = {}
 
-    # 2) JSON (часто используют для recurring)
+    # 2) JSON
     if not params:
         try:
             params = await request.json()
         except Exception:
             params = {}
 
-    # 3) RAW body: OutSum=...&InvId=... — тоже встречается
+    # 3) RAW body: OutSum=...&InvId=...
     if not params:
         try:
             raw_body = (await request.body()).decode()
@@ -118,8 +126,8 @@ async def robokassa_result(request: Request):
     )
 
     if not user_id_raw:
-        # Для recurring подписок Shp_user может не приходить.
-        # Для тестов берём test_user_id из feature_flags.
+        # Для recurring Shp_user может не приходить.
+        # Для тестов/резерва берём test_user_id из feature_flags.
         test_uid = rk.get("test_user_id")
         if test_uid:
             user_id_raw = test_uid
@@ -129,12 +137,14 @@ async def robokassa_result(request: Request):
 
     user_id = int(user_id_raw)
 
-    inv_id = (
+    # ---------- InvId ----------
+    inv_id_val = (
         params.get("InvId")
         or params.get("inv_id")
     )
-    inv_id = str(inv_id)
+    inv_id = str(inv_id_val)
 
+    # ---------- сумма в рублях ----------
     out_sum_raw = (
         params.get("OutSum")
         or params.get("out_summ")
@@ -194,11 +204,15 @@ async def robokassa_result(request: Request):
         on_conflict="user_id",
     ).execute()
 
-    log_event(user_id, "subscription_payment_received", {
-        "invoice_id": inv_id,
-        "amount_rub": amount_rub,
-        "payer_email": email
-    })
+    log_event(
+        user_id,
+        "subscription_payment_received",
+        {
+            "invoice_id": inv_id,
+            "amount_rub": amount_rub,
+            "payer_email": email,
+        },
+    )
     print("✅ Payment processed OK", inv_id)
 
     # МГНОВЕННЫЙ ПРИВЕТСТВЕННЫЙ ПУШ
