@@ -19,15 +19,14 @@ PASSWORD2 = "K8YSV68WNkYzVSeh52YF"       # robokassa_keys.password2
 
 # --- Подпись для RESULT-запроса ---
 # Формула Robokassa: md5(f"{OutSum}:{InvId}:{Password2}:Shp_user={USER_ID}")
-raw = f"{OUT_SUM}:{INV_ID}:{PASSWORD2}:Shp_user={USER_ID}"
+raw = f"{OUT_SUM}:{INV_ID}:{PASSWORD2}"
 SIGN = hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 payload = {
     "OutSum": OUT_SUM,
     "InvId": INV_ID,
     "SignatureValue": SIGN,
-    "Shp_user": str(USER_ID),
-    "IsTest": IS_TEST,
+    # Shp_user НЕ добавляем
 }
 
 print(f"[TEST] POST → {VPS_BASE}/robokassa/result")

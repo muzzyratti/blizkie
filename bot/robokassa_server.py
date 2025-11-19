@@ -11,16 +11,61 @@ app = FastAPI()
 BOT_USERNAME = "blizkie_igry_bot"
 
 def verify_signature(params: dict, password2: str) -> bool:
-    out_sum = params.get("OutSum")
-    inv_id = params.get("InvId")
-    shp_params = {k: v for k, v in params.items() if k.lower().startswith("shp_")}
-    shp_string = ":".join([f"{k}={shp_params[k]}" for k in sorted(shp_params)])
+    """
+    Универсальная проверка подписи для Robokassa:
+    - принимает OutSum/out_summ
+    - принимает InvId/inv_id
+    - не использует Shp-параметры (в подписках их нет)
+    - принимает SignatureValue или crc
+    - нормализует OutSum до "%.2f"
+    """
+
+    # 1. Достаём сумму
+    out_sum_raw = (
+        params.get("OutSum")
+        or params.get("out_summ")
+        or params.get("outsumm")
+        or params.get("outsum")
+    )
+    if out_sum_raw is None:
+        return False
+
+    # нормализуем OutSum в формát "%.2f"
+    try:
+        out_sum = f"{float(out_sum_raw):.2f}"
+    except:
+        return False
+
+    # 2. Достаём ID счета
+    inv_id_raw = (
+        params.get("InvId")
+        or params.get("inv_id")
+        or params.get("InvoiceId")
+        or params.get("invoice_id")
+    )
+    if inv_id_raw is None:
+        return False
+
+    inv_id = str(inv_id_raw)
+
+    # 3. Достаём подпись
+    recv_sig = (
+        params.get("SignatureValue")
+        or params.get("signaturevalue")
+        or params.get("signature")
+        or params.get("crc")
+        or ""
+    ).upper()
+
+    if not recv_sig:
+        return False
+
+    # 4. Формируем raw-строку для подписки
+    # MD5(OutSum:InvId:Password2)
     raw = f"{out_sum}:{inv_id}:{password2}"
-    if shp_string:
-        raw = f"{raw}:{shp_string}"
     calc = hashlib.md5(raw.encode()).hexdigest().upper()
-    recv = params.get("SignatureValue", "").upper()
-    return calc == recv
+
+    return calc == recv_sig
 
 
 @app.post("/robokassa/result")
@@ -36,7 +81,25 @@ async def robokassa_result(request: Request):
         print("❌ Invalid signature")
         return Response("Invalid signature", status_code=400)
 
-    user_id = int(params.get("Shp_user"))
+    user_id_raw = (
+        params.get("Shp_user")
+        or params.get("shp_user")
+        or params.get("UserId")
+        or params.get("user_id")
+    )
+
+    if not user_id_raw:
+        # В подписках Robokassa Shp_user не приходит вообще.
+        # Поэтому для продакшена нужно будет доставать user_id из базы,
+        # но для тестов мы читаем его из feature_flags.
+        test_uid = get_rk_settings().get("test_user_id")
+        if test_uid:
+            user_id_raw = test_uid
+        else:
+            print("❌ No Shp_user in recurring payment and no fallback user_id set.")
+            return Response("Missing user_id", status_code=400)
+
+    user_id = int(user_id_raw)
     inv_id = str(params.get("InvId"))
     out_sum_rub = float(params.get("OutSum", 0.0))
     amount_cents = int(round(out_sum_rub * 100))
