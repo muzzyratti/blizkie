@@ -63,7 +63,7 @@ def verify_signature(params: dict, password2: str) -> bool:
     else:
         calc2 = None
 
-    # Формула №3 — fallback (Password2.upper())
+    # Формула №3 — fallback
     raw3 = f"{out_sum}:{inv_id}:{password2.upper()}"
     calc3 = hashlib.md5(raw3.encode()).hexdigest().upper()
 
@@ -85,48 +85,37 @@ async def robokassa_result(request: Request):
     rk = get_rk_settings()
     password2 = rk["password2"]
 
+    # Читаем тело ТОЛЬКО один раз
+    raw_body = (await request.body()).decode(errors="ignore")
     content_type = (request.headers.get("content-type") or "").lower()
 
-    # 0) Любой JSON (в т.ч. JWS / PaymentStateNotification) — игнорируем
-    if "application/json" in content_type:
-        raw_body = (await request.body()).decode(errors="ignore")
-        print("🟡 JSON callback received on /robokassa/result")
-        print("🟡 RAW JSON/JWS body (truncated):", raw_body[:400])
+    print("🟡 Result headers:", request.headers)
+    print("🟡 Content-Type:", content_type)
+    print("🟡 RAW body (cached):", raw_body[:500])
 
-        # JWS (JWT) от сервиса подписок Robokassa
-        if raw_body.strip().startswith("eyJ"):
-            print("⚠️ JWT PaymentStateNotification → игнорируем, отвечаем 200 OK")
-        else:
-            print("⚠️ JSON callback (не классический RESULT) → игнорируем")
-
-        # ВАЖНО: НИКАКИХ операций с БД и пушами
+    # 0) Любой JSON/JWT → игнорируем (PaymentStateNotification)
+    if "application/json" in content_type or raw_body.strip().startswith("eyJ"):
+        print("⚠️ JSON/JWS PaymentStateNotification → игнорируем → 200 OK")
         return Response("OK", media_type="text/plain")
 
     params: dict = {}
 
-    # 1) form-data / x-www-form-urlencoded — наш основной рабочий кейс
+    # 1) form-data / x-www-form-urlencoded
     try:
         form = await request.form()
         params = dict(form.items())
     except Exception:
         params = {}
 
-    # 2) RAW body: OutSum=...&InvId=...
+    # 2) Если form пустой — парсим закэшированное тело
     if not params:
-        try:
-            raw_body = (await request.body()).decode(errors="ignore")
-            tmp = {}
-            for p in raw_body.split("&"):
-                if "=" in p:
-                    k, v = p.split("=", 1)
-                    tmp[k] = v
-            params = tmp
-        except Exception:
-            params = {}
+        tmp = {}
+        for p in raw_body.split("&"):
+            if "=" in p:
+                k, v = p.split("=", 1)
+                tmp[k] = v
+        params = tmp
 
-    print("🟡 Result headers:", request.headers)
-    print("🟡 Content-Type:", content_type)
-    print("🟡 RAW body (form/urlencoded):", (await request.body()).decode(errors="ignore"))
     print("🟡 Robokassa RESULT received params:", params)
 
     # --- Проверка подписи ---
@@ -239,7 +228,7 @@ async def robokassa_result(request: Request):
     print("✅ Payment processed OK", inv_id)
 
     # ------------------------------
-    # SINGLE premium_welcome PUSH (с защитой от дублей)
+    # SINGLE premium_welcome PUSH (без дублей)
     # ------------------------------
     existing = (
         supabase.table("push_queue")
@@ -250,8 +239,8 @@ async def robokassa_result(request: Request):
         .execute()
     )
 
-    if existing.data and len(existing.data) > 0:
-        print(f"⚠️ premium_welcome уже есть в очереди (pending) для user={user_id}, не дублируем")
+    if existing.data:
+        print(f"⚠️ premium_welcome уже есть для user={user_id}, не дублируем")
     else:
         supabase.table("push_queue").insert(
             {
