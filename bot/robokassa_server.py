@@ -73,9 +73,30 @@ async def robokassa_result(request: Request):
     rk = get_rk_settings()
     password2 = rk["password2"]
 
-    form = await request.form()
-    params = dict(form.items())
+    try:
+        form = await request.form()
+        params = dict(form.items())
+    except:
+        params = {}
+
+    # если form пустой, пробуем JSON
+    if not params:
+        try:
+            raw_body = (await request.body()).decode()
+            parts = raw_body.split("&")
+            params = {}
+            for p in parts:
+                if "=" in p:
+                    k, v = p.split("=", 1)
+                    params[k] = v
+        except:
+            params = {}
+            
     print("🟡 Robokassa RESULT received:", params)
+    print("🟡 Result headers:", request.headers)
+    print("🟡 Content-Type:", request.headers.get("content-type"))
+    print("🟡 RAW body:", await request.body())
+    print("🟡 Parsed params:", params)
 
     if not verify_signature(params, password2):
         print("❌ Invalid signature")
