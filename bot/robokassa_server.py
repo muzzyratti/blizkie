@@ -10,14 +10,15 @@ from utils.push_scheduler import schedule_premium_ritual
 app = FastAPI()
 BOT_USERNAME = "blizkie_igry_bot"
 
+
 def verify_signature(params: dict, password2: str) -> bool:
     """
     Универсальная проверка подписи для Robokassa:
     - принимает OutSum/out_summ
     - принимает InvId/inv_id
-    - не использует Shp-параметры (в подписках их нет)
+    - не использует Shp-параметры
     - принимает SignatureValue или crc
-    - нормализует OutSum до "%.2f"
+    - НЕ меняет формат суммы (используем строку как есть!)
     """
 
     # 1. Достаём сумму
@@ -30,11 +31,8 @@ def verify_signature(params: dict, password2: str) -> bool:
     if out_sum_raw is None:
         return False
 
-    # нормализуем OutSum в формát "%.2f"
-    try:
-        out_sum = f"{float(out_sum_raw):.2f}"
-    except:
-        return False
+    # Берём строку как есть, без float/format
+    out_sum = str(out_sum_raw).strip()
 
     # 2. Достаём ID счета
     inv_id_raw = (
@@ -46,7 +44,7 @@ def verify_signature(params: dict, password2: str) -> bool:
     if inv_id_raw is None:
         return False
 
-    inv_id = str(inv_id_raw)
+    inv_id = str(inv_id_raw).strip()
 
     # 3. Достаём подпись
     recv_sig = (
@@ -60,7 +58,7 @@ def verify_signature(params: dict, password2: str) -> bool:
     if not recv_sig:
         return False
 
-    # 4. Формируем raw-строку для подписки
+    # 4. Формируем raw-строку для проверки
     # MD5(OutSum:InvId:Password2)
     raw = f"{out_sum}:{inv_id}:{password2}"
     calc = hashlib.md5(raw.encode()).hexdigest().upper()
@@ -73,35 +71,45 @@ async def robokassa_result(request: Request):
     rk = get_rk_settings()
     password2 = rk["password2"]
 
+    params: dict = {}
+
+    # 1) form-data / x-www-form-urlencoded (классический случай)
     try:
         form = await request.form()
         params = dict(form.items())
-    except:
+    except Exception:
         params = {}
 
-    # если form пустой, пробуем JSON
+    # 2) JSON (часто используют для recurring)
+    if not params:
+        try:
+            params = await request.json()
+        except Exception:
+            params = {}
+
+    # 3) RAW body: OutSum=...&InvId=... — тоже встречается
     if not params:
         try:
             raw_body = (await request.body()).decode()
-            parts = raw_body.split("&")
-            params = {}
-            for p in parts:
+            tmp = {}
+            for p in raw_body.split("&"):
                 if "=" in p:
                     k, v = p.split("=", 1)
-                    params[k] = v
-        except:
+                    tmp[k] = v
+            params = tmp
+        except Exception:
             params = {}
-            
+
+    # Логирование для отладки
     print("🟡 Robokassa RESULT received:", params)
     print("🟡 Result headers:", request.headers)
     print("🟡 Content-Type:", request.headers.get("content-type"))
-    print("🟡 RAW body:", await request.body())
-    print("🟡 Parsed params:", params)
 
     if not verify_signature(params, password2):
         print("❌ Invalid signature")
         return Response("Invalid signature", status_code=400)
 
+    # ---------- user_id ----------
     user_id_raw = (
         params.get("Shp_user")
         or params.get("shp_user")
@@ -110,10 +118,9 @@ async def robokassa_result(request: Request):
     )
 
     if not user_id_raw:
-        # В подписках Robokassa Shp_user не приходит вообще.
-        # Поэтому для продакшена нужно будет доставать user_id из базы,
-        # но для тестов мы читаем его из feature_flags.
-        test_uid = get_rk_settings().get("test_user_id")
+        # Для recurring подписок Shp_user может не приходить.
+        # Для тестов берём test_user_id из feature_flags.
+        test_uid = rk.get("test_user_id")
         if test_uid:
             user_id_raw = test_uid
         else:
@@ -121,29 +128,44 @@ async def robokassa_result(request: Request):
             return Response("Missing user_id", status_code=400)
 
     user_id = int(user_id_raw)
-    inv_id = str(params.get("InvId"))
-    out_sum_rub = float(params.get("OutSum", 0.0))
+
+    inv_id = (
+        params.get("InvId")
+        or params.get("inv_id")
+    )
+    inv_id = str(inv_id)
+
+    out_sum_raw = (
+        params.get("OutSum")
+        or params.get("out_summ")
+        or "0"
+    )
+    out_sum_rub = float(out_sum_raw)
     amount_cents = int(round(out_sum_rub * 100))
 
     now = datetime.now(timezone.utc)
     next_month = now + timedelta(days=30)
     email = params.get("EMail") or params.get("Email")
 
-    # СОХРАНЯЕМ ПЛАТЁЖ
+    # ---------- PAYMENTS ----------
     up = (
-        supabase.table("payments").upsert({
-            "user_id": user_id,
-            "provider": "robokassa",
-            "kind": "subscription",
-            "amount_cents": amount_cents,
-            "currency": "RUB",
-            "status": "paid",
-            "external_id": inv_id,
-            "raw": params,
-            "paid_at": now.isoformat(),
-            "payer_email": email
-        }, on_conflict="provider,external_id").execute()
+        supabase.table("payments").upsert(
+            {
+                "user_id": user_id,
+                "provider": "robokassa",
+                "kind": "subscription",
+                "amount_cents": amount_cents,
+                "currency": "RUB",
+                "status": "paid",
+                "external_id": inv_id,
+                "raw": params,
+                "paid_at": now.isoformat(),
+                "payer_email": email,
+            },
+            on_conflict="provider,external_id",
+        ).execute()
     )
+
     if up.data and len(up.data):
         payment_id = up.data[0]["id"]
     else:
@@ -156,36 +178,44 @@ async def robokassa_result(request: Request):
         )
         payment_id = sel.data["id"]
 
-    # ОБНОВЛЯЕМ ПОДПИСКУ
+    # ---------- USER SUBSCRIPTIONS ----------
     plan_name = rk.get("plan_name", "monthly")
-    supabase.table("user_subscriptions").upsert({
-        "user_id": user_id,
-        "plan_name": plan_name,
-        "auto_renew": True,
-        "is_active": True,
-        "renewed_at": now.isoformat(),
-        "expires_at": next_month.isoformat(),
-        "last_payment_id": payment_id,
-        "payer_email": email
-    }, on_conflict="user_id").execute()
+    supabase.table("user_subscriptions").upsert(
+        {
+            "user_id": user_id,
+            "plan_name": plan_name,
+            "auto_renew": True,
+            "is_active": True,
+            "renewed_at": now.isoformat(),
+            "expires_at": next_month.isoformat(),
+            "last_payment_id": payment_id,
+            "payer_email": email,
+        },
+        on_conflict="user_id",
+    ).execute()
 
-    log_event(user_id, "subscription_payment_received", {
-        "invoice_id": inv_id,
-        "amount_cents": amount_cents,
-        "payer_email": email
-    })
+    log_event(
+        user_id,
+        "subscription_payment_received",
+        {
+            "invoice_id": inv_id,
+            "amount_cents": amount_cents,
+            "payer_email": email,
+        },
+    )
     print("✅ Payment processed OK", inv_id)
 
     # МГНОВЕННЫЙ ПРИВЕТСТВЕННЫЙ ПУШ
-    supabase.table("push_queue").insert({
-        "user_id": user_id,
-        "type": "premium_welcome",
-        "status": "pending",
-        "scheduled_at": now.isoformat(),
-        "payload": {"amount_rub": out_sum_rub}
-    }).execute()
+    supabase.table("push_queue").insert(
+        {
+            "user_id": user_id,
+            "type": "premium_welcome",
+            "status": "pending",
+            "scheduled_at": now.isoformat(),
+            "payload": {"amount_rub": out_sum_rub},
+        }
+    ).execute()
 
-    # <<< ДОБАВЛЯЕМ СЮДА: ПОСТАНОВКА WEEKLY PREMIUM RITUAL >>>
     try:
         schedule_premium_ritual(user_id)
         print("🟢 Scheduled weekly premium_ritual for user:", user_id)
@@ -217,7 +247,7 @@ async def robokassa_success(request: Request):
     html = _html_back_to_bot(
         "Оплата успешно принята",
         "Секунду… проверяю статус подписки.",
-        f"payment_ok_{inv_id}"
+        f"payment_ok_{inv_id}",
     )
     return HTMLResponse(content=html)
 
@@ -228,11 +258,12 @@ async def robokassa_fail(request: Request):
     html = _html_back_to_bot(
         "Оплата не завершена",
         "Если это ошибка — вернёмся в бот и попробуем ещё раз.",
-        f"payment_fail_{inv_id}"
+        f"payment_fail_{inv_id}",
     )
     return HTMLResponse(content=html)
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
