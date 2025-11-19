@@ -12,42 +12,28 @@ BOT_USERNAME = "blizkie_igry_bot"
 
 
 def verify_signature(params: dict, password2: str) -> bool:
-    """
-    Универсальная проверка подписи для Robokassa:
-    - принимает OutSum/out_summ
-    - принимает InvId/inv_id
-    - не использует Shp-параметры
-    - принимает SignatureValue или crc
-    - НЕ меняет формат суммы (используем строку как есть!)
-    """
-
-    # 1. Достаём сумму (строка как есть)
     out_sum_raw = (
         params.get("OutSum")
         or params.get("out_summ")
         or params.get("outsumm")
         or params.get("outsum")
     )
-    if out_sum_raw is None:
-        print("🔴 verify_signature: no OutSum/out_summ in params")
+    if not out_sum_raw:
+        print("🔴 verify_signature: no OutSum")
         return False
-
     out_sum = str(out_sum_raw).strip()
 
-    # 2. Достаём ID счета (строка как есть)
     inv_id_raw = (
         params.get("InvId")
         or params.get("inv_id")
         or params.get("InvoiceId")
         or params.get("invoice_id")
     )
-    if inv_id_raw is None:
-        print("🔴 verify_signature: no InvId/inv_id in params")
+    if not inv_id_raw:
+        print("🔴 verify_signature: no InvId")
         return False
-
     inv_id = str(inv_id_raw).strip()
 
-    # 3. Достаём подпись из Robokassa
     recv_sig = (
         params.get("SignatureValue")
         or params.get("signaturevalue")
@@ -56,22 +42,29 @@ def verify_signature(params: dict, password2: str) -> bool:
         or ""
     )
     if not recv_sig:
-        print("🔴 verify_signature: no SignatureValue/crc in params")
+        print("🔴 verify_signature: no SignatureValue")
         return False
-
     recv_sig_up = str(recv_sig).upper()
 
-    # 4. Формируем raw-строку для проверки: MD5(OutSum:InvId:Password2)
-    raw = f"{out_sum}:{inv_id}:{password2}"
-    calc = hashlib.md5(raw.encode()).hexdigest().upper()
+    # 🧮 Формула №1 — обычные платежи
+    raw1 = f"{out_sum}:{inv_id}:{password2}"
+    calc1 = hashlib.md5(raw1.encode()).hexdigest().upper()
 
-    # Лог для дебага
+    # 🧮 Формула №2 — платежи подписки (есть SubscriptionId)
+    subscription_id = params.get("SubscriptionId") or params.get("subscriptionid")
+    if subscription_id:
+        raw2 = f"{out_sum}:{inv_id}:{subscription_id}:{password2}"
+        calc2 = hashlib.md5(raw2.encode()).hexdigest().upper()
+    else:
+        calc2 = None
+
     print("🧩 verify_signature debug:")
-    print("   raw      =", raw)
-    print("   calc_sig =", calc)
     print("   recv_sig =", recv_sig_up)
+    print("   calc1    =", calc1)
+    if calc2:
+        print("   calc2    =", calc2, "(➕ SubscriptionId присутствует)")
 
-    return calc == recv_sig_up
+    return recv_sig_up in (calc1, calc2)
 
 
 @app.post("/robokassa/result")
