@@ -141,7 +141,7 @@ async def robokassa_result(request: Request):
         or "0"
     )
     out_sum_rub = float(out_sum_raw)
-    amount_cents = int(round(out_sum_rub * 100))
+    amount_rub = out_sum_rub
 
     now = datetime.now(timezone.utc)
     next_month = now + timedelta(days=30)
@@ -154,7 +154,7 @@ async def robokassa_result(request: Request):
                 "user_id": user_id,
                 "provider": "robokassa",
                 "kind": "subscription",
-                "amount_cents": amount_cents,
+                "amount_rub": amount_rub,
                 "currency": "RUB",
                 "status": "paid",
                 "external_id": inv_id,
@@ -194,15 +194,11 @@ async def robokassa_result(request: Request):
         on_conflict="user_id",
     ).execute()
 
-    log_event(
-        user_id,
-        "subscription_payment_received",
-        {
-            "invoice_id": inv_id,
-            "amount_cents": amount_cents,
-            "payer_email": email,
-        },
-    )
+    log_event(user_id, "subscription_payment_received", {
+        "invoice_id": inv_id,
+        "amount_rub": amount_rub,
+        "payer_email": email
+    })
     print("✅ Payment processed OK", inv_id)
 
     # МГНОВЕННЫЙ ПРИВЕТСТВЕННЫЙ ПУШ
