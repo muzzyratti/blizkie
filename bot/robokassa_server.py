@@ -7,9 +7,6 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 from utils.push_scheduler import schedule_premium_ritual
 
-import json
-from urllib.parse import parse_qsl
-
 app = FastAPI()
 BOT_USERNAME = "blizkie_igry_bot"
 
@@ -66,7 +63,7 @@ def verify_signature(params: dict, password2: str) -> bool:
     else:
         calc2 = None
 
-    # Формула №3 — micropayment fallback (Password2.upper())
+    # Формула №3 — fallback (Password2.upper())
     raw3 = f"{out_sum}:{inv_id}:{password2.upper()}"
     calc3 = hashlib.md5(raw3.encode()).hexdigest().upper()
 
@@ -80,20 +77,6 @@ def verify_signature(params: dict, password2: str) -> bool:
     return recv_sig_up in (calc1, calc2, calc3)
 
 
-def _is_jwt_like(text: str) -> bool:
-    """
-    Очень простая эвристика: строка вида xxx.yyy.zzz и первый кусок начинается с 'eyJ'.
-    Этого достаточно, чтобы отличить PaymentStateNotification от обычного RESULT.
-    """
-    text = (text or "").strip()
-    if not text:
-        return False
-    if text.count(".") != 2:
-        return False
-    header_b64 = text.split(".", 1)[0]
-    return header_b64.startswith("eyJ")
-
-
 # -------------------------------
 # RESULT HANDLER
 # -------------------------------
@@ -102,57 +85,48 @@ async def robokassa_result(request: Request):
     rk = get_rk_settings()
     password2 = rk["password2"]
 
-    # Сразу читаем тело один раз
-    raw_body_bytes = await request.body()
-    raw_body = raw_body_bytes.decode(errors="ignore").strip()
     content_type = (request.headers.get("content-type") or "").lower()
 
-    # Логи для дебага
-    print("🟡 Result headers:", request.headers)
-    print("🟡 Content-Type:", content_type)
-    print("🟡 RAW body:", raw_body[:500])
+    # 0) Любой JSON (в т.ч. JWS / PaymentStateNotification) — игнорируем
+    if "application/json" in content_type:
+        raw_body = (await request.body()).decode(errors="ignore")
+        print("🟡 JSON callback received on /robokassa/result")
+        print("🟡 RAW JSON/JWS body (truncated):", raw_body[:400])
 
-    # --------------------------
-    # 0) JWS / JWT (PaymentStateNotification)
-    # --------------------------
-    # Документация: ResultUrl2 может получать JWS в виде одной base64-строки.
-    # Поддержка прислала пример такого токена.
-    # Эти уведомления нам сейчас не нужны — игнорируем, но отвечаем 200 OK,
-    # чтобы Robokassa не ретраила запрос.
-    params: dict = {}
+        # JWS (JWT) от сервиса подписок Robokassa
+        if raw_body.strip().startswith("eyJ"):
+            print("⚠️ JWT PaymentStateNotification → игнорируем, отвечаем 200 OK")
+        else:
+            print("⚠️ JSON callback (не классический RESULT) → игнорируем")
 
-    # Вариант 0.1: тело — чистая JWT-строка "xxx.yyy.zzz"
-    if _is_jwt_like(raw_body):
-        print("⚠️ JWT PaymentStateNotification (raw body) → игнорируем, возвращаем 200 OK")
+        # ВАЖНО: НИКАКИХ операций с БД и пушами
         return Response("OK", media_type="text/plain")
 
-    # Вариант 0.2: тело — JSON, внутри которого лежит JWT
-    if "application/json" in content_type:
+    params: dict = {}
+
+    # 1) form-data / x-www-form-urlencoded — наш основной рабочий кейс
+    try:
+        form = await request.form()
+        params = dict(form.items())
+    except Exception:
+        params = {}
+
+    # 2) RAW body: OutSum=...&InvId=...
+    if not params:
         try:
-            parsed_json = json.loads(raw_body) if raw_body else {}
+            raw_body = (await request.body()).decode(errors="ignore")
+            tmp = {}
+            for p in raw_body.split("&"):
+                if "=" in p:
+                    k, v = p.split("=", 1)
+                    tmp[k] = v
+            params = tmp
         except Exception:
-            parsed_json = {}
-
-        if isinstance(parsed_json, dict) and len(parsed_json) == 1:
-            only_key = next(iter(parsed_json))
-            only_val = parsed_json[only_key]
-            # { "<jwt>": "" } или { "token": "<jwt>" }
-            if _is_jwt_like(only_key) or _is_jwt_like(str(only_val)):
-                print("⚠️ JWT PaymentStateNotification (JSON) → игнорируем, возвращаем 200 OK")
-                return Response("OK", media_type="text/plain")
-
-        # Если это не JWT, но JSON — считаем, что это params (на всякий).
-        if isinstance(parsed_json, dict):
-            params = parsed_json
-        else:
             params = {}
-    elif "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
-        # Классический RESULT: OutSum=...&InvId=...
-        params = dict(parse_qsl(raw_body))
-    else:
-        # Неизвестный content-type — пробуем как query-string
-        params = dict(parse_qsl(raw_body))
 
+    print("🟡 Result headers:", request.headers)
+    print("🟡 Content-Type:", content_type)
+    print("🟡 RAW body (form/urlencoded):", (await request.body()).decode(errors="ignore"))
     print("🟡 Robokassa RESULT received params:", params)
 
     # --- Проверка подписи ---
@@ -265,17 +239,30 @@ async def robokassa_result(request: Request):
     print("✅ Payment processed OK", inv_id)
 
     # ------------------------------
-    # SINGLE premium_welcome PUSH
+    # SINGLE premium_welcome PUSH (с защитой от дублей)
     # ------------------------------
-    supabase.table("push_queue").insert(
-        {
-            "user_id": user_id,
-            "type": "premium_welcome",
-            "status": "pending",
-            "scheduled_at": now.isoformat(),
-            "payload": {"amount_rub": out_sum_rub},
-        }
-    ).execute()
+    existing = (
+        supabase.table("push_queue")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("type", "premium_welcome")
+        .eq("status", "pending")
+        .execute()
+    )
+
+    if existing.data and len(existing.data) > 0:
+        print(f"⚠️ premium_welcome уже есть в очереди (pending) для user={user_id}, не дублируем")
+    else:
+        supabase.table("push_queue").insert(
+            {
+                "user_id": user_id,
+                "type": "premium_welcome",
+                "status": "pending",
+                "scheduled_at": now.isoformat(),
+                "payload": {"amount_rub": out_sum_rub},
+            }
+        ).execute()
+        print(f"✅ premium_welcome добавлен в очередь для user={user_id}")
 
     # ------------------------------
     # WEEKLY RITUAL
@@ -293,7 +280,6 @@ async def robokassa_result(request: Request):
 # SUCCESS / FAIL PAGES
 # -------------------------------
 def _html_back_to_bot(title: str, text: str, payload: str) -> str:
-    # Вернул простой deeplink в бота (как у тебя сейчас)
     deeplink = f"https://t.me/{BOT_USERNAME}"
     return f"""<!doctype html>
 <html><head>
