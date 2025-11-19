@@ -43,6 +43,7 @@ async def robokassa_result(request: Request):
 
     now = datetime.now(timezone.utc)
     next_month = now + timedelta(days=30)
+    email = params.get("EMail") or params.get("Email")
 
     # СОХРАНЯЕМ ПЛАТЁЖ
     up = (
@@ -56,6 +57,7 @@ async def robokassa_result(request: Request):
             "external_id": inv_id,
             "raw": params,
             "paid_at": now.isoformat(),
+            "payer_email": email
         }, on_conflict="provider,external_id").execute()
     )
     if up.data and len(up.data):
@@ -80,11 +82,13 @@ async def robokassa_result(request: Request):
         "renewed_at": now.isoformat(),
         "expires_at": next_month.isoformat(),
         "last_payment_id": payment_id,
+        "payer_email": email
     }, on_conflict="user_id").execute()
 
     log_event(user_id, "subscription_payment_received", {
         "invoice_id": inv_id,
-        "amount_cents": amount_cents
+        "amount_cents": amount_cents,
+        "payer_email": email
     })
     print("✅ Payment processed OK", inv_id)
 

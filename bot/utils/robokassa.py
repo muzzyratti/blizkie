@@ -66,15 +66,28 @@ def make_payment_link(*, user_id: int, amount_rub: int | float, description: str
     rk = get_rk_settings()
     subscription_url = rk.get("subscription_url")
 
-    # ---- CASE 1: новая подписка, короткий линк из кабинета ----
+    # ==============================================
+    # CASE 1 → Новая логика сервисов Подписок Robokassa
+    # ==============================================
+    # Берём прямую ссылку из личного кабинета:
+    # https://auth.robokassa.ru/RecurringSubscriptionPage/Subscription/Subscribe?SubscriptionId=...
+    #
+    # Полная логика формирования подписи / Receipt в этом сценарии НЕ НУЖНА.
+    # Мы только добавляем Shp_user, чтобы знать какой TG user оплатил.
+    # ==============================================
     if subscription_url and "auth.robokassa.ru" in subscription_url:
         if "?" in subscription_url:
             pay_url = f"{subscription_url}&Shp_user={user_id}"
         else:
             pay_url = f"{subscription_url}?Shp_user={user_id}"
-        return pay_url, 0
+        return pay_url, 0  # InvId не используется в этом режиме
 
-    # ---- CASE 2: fallback — старая логика ручного формирования ----
+
+    # ===================================================
+    # CASE 2 → fallback для старых разовых платежей
+    # (оставляем как было, ничего не ломаем)
+    # ===================================================
+
     login = rk["login"]
     password1 = rk["password1"]
     is_test = bool(rk.get("is_test", True))
