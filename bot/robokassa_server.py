@@ -7,6 +7,9 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 from utils.push_scheduler import schedule_premium_ritual
 
+import json
+from urllib.parse import parse_qsl
+
 app = FastAPI()
 BOT_USERNAME = "blizkie_igry_bot"
 
@@ -77,6 +80,20 @@ def verify_signature(params: dict, password2: str) -> bool:
     return recv_sig_up in (calc1, calc2, calc3)
 
 
+def _is_jwt_like(text: str) -> bool:
+    """
+    Очень простая эвристика: строка вида xxx.yyy.zzz и первый кусок начинается с 'eyJ'.
+    Этого достаточно, чтобы отличить PaymentStateNotification от обычного RESULT.
+    """
+    text = (text or "").strip()
+    if not text:
+        return False
+    if text.count(".") != 2:
+        return False
+    header_b64 = text.split(".", 1)[0]
+    return header_b64.startswith("eyJ")
+
+
 # -------------------------------
 # RESULT HANDLER
 # -------------------------------
@@ -85,48 +102,58 @@ async def robokassa_result(request: Request):
     rk = get_rk_settings()
     password2 = rk["password2"]
 
+    # Сразу читаем тело один раз
+    raw_body_bytes = await request.body()
+    raw_body = raw_body_bytes.decode(errors="ignore").strip()
+    content_type = (request.headers.get("content-type") or "").lower()
+
+    # Логи для дебага
+    print("🟡 Result headers:", request.headers)
+    print("🟡 Content-Type:", content_type)
+    print("🟡 RAW body:", raw_body[:500])
+
+    # --------------------------
+    # 0) JWS / JWT (PaymentStateNotification)
+    # --------------------------
+    # Документация: ResultUrl2 может получать JWS в виде одной base64-строки.
+    # Поддержка прислала пример такого токена.
+    # Эти уведомления нам сейчас не нужны — игнорируем, но отвечаем 200 OK,
+    # чтобы Robokassa не ретраила запрос.
     params: dict = {}
 
-    # 1) form-data / x-www-form-urlencoded
-    try:
-        form = await request.form()
-        params = dict(form.items())
-    except Exception:
-        pass
+    # Вариант 0.1: тело — чистая JWT-строка "xxx.yyy.zzz"
+    if _is_jwt_like(raw_body):
+        print("⚠️ JWT PaymentStateNotification (raw body) → игнорируем, возвращаем 200 OK")
+        return Response("OK", media_type="text/plain")
 
-    # 2) JSON (часто присылают пустой {} или JWT внутри)
-    if not params:
+    # Вариант 0.2: тело — JSON, внутри которого лежит JWT
+    if "application/json" in content_type:
         try:
-            params = await request.json()
-
-            # 🔥 2.1: JWT-уведомления PaymentStateNotification
-            # Robokassa присылает их как:
-            # { "<jwt>": "" }
-            if len(params) == 1:
-                only_key = next(iter(params))
-                if only_key.startswith("eyJ"):
-                    print("⚠️ JWT PaymentStateNotification received → ignoring")
-                    return Response("OK", media_type="text/plain")
-
+            parsed_json = json.loads(raw_body) if raw_body else {}
         except Exception:
-            params = {}
+            parsed_json = {}
 
-    # 3) RAW body: OutSum=...&InvId=...
-    if not params:
-        try:
-            raw_body = (await request.body()).decode()
-            tmp = {}
-            for p in raw_body.split("&"):
-                if "=" in p:
-                    k, v = p.split("=", 1)
-                    tmp[k] = v
-            params = tmp
-        except Exception:
-            params = {}
+        if isinstance(parsed_json, dict) and len(parsed_json) == 1:
+            only_key = next(iter(parsed_json))
+            only_val = parsed_json[only_key]
+            # { "<jwt>": "" } или { "token": "<jwt>" }
+            if _is_jwt_like(only_key) or _is_jwt_like(str(only_val)):
+                print("⚠️ JWT PaymentStateNotification (JSON) → игнорируем, возвращаем 200 OK")
+                return Response("OK", media_type="text/plain")
 
-    print("🟡 Robokassa RESULT received:", params)
-    print("🟡 Result headers:", request.headers)
-    print("🟡 Content-Type:", request.headers.get("content-type"))
+        # Если это не JWT, но JSON — считаем, что это params (на всякий).
+        if isinstance(parsed_json, dict):
+            params = parsed_json
+        else:
+            params = {}
+    elif "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        # Классический RESULT: OutSum=...&InvId=...
+        params = dict(parse_qsl(raw_body))
+    else:
+        # Неизвестный content-type — пробуем как query-string
+        params = dict(parse_qsl(raw_body))
+
+    print("🟡 Robokassa RESULT received params:", params)
 
     # --- Проверка подписи ---
     if not verify_signature(params, password2):
@@ -266,6 +293,7 @@ async def robokassa_result(request: Request):
 # SUCCESS / FAIL PAGES
 # -------------------------------
 def _html_back_to_bot(title: str, text: str, payload: str) -> str:
+    # Вернул простой deeplink в бота (как у тебя сейчас)
     deeplink = f"https://t.me/{BOT_USERNAME}"
     return f"""<!doctype html>
 <html><head>
