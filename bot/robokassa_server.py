@@ -44,27 +44,34 @@ def verify_signature(params: dict, password2: str) -> bool:
     if not recv_sig:
         print("🔴 verify_signature: no SignatureValue")
         return False
-    recv_sig_up = str(recv_sig).upper()
 
-    # 🧮 Формула №1 — обычные платежи
+    recv_sig_up = recv_sig.upper()
+
+    subscription_id = params.get("SubscriptionId") or params.get("subscriptionid")
+
+    # Формула №1 — стандартная
     raw1 = f"{out_sum}:{inv_id}:{password2}"
     calc1 = hashlib.md5(raw1.encode()).hexdigest().upper()
 
-    # 🧮 Формула №2 — платежи подписки (есть SubscriptionId)
-    subscription_id = params.get("SubscriptionId") or params.get("subscriptionid")
+    # Формула №2 — подписки
     if subscription_id:
         raw2 = f"{out_sum}:{inv_id}:{subscription_id}:{password2}"
         calc2 = hashlib.md5(raw2.encode()).hexdigest().upper()
     else:
         calc2 = None
 
+    # Формула №3 — micropayment fallback (Password2.upper())
+    raw3 = f"{out_sum}:{inv_id}:{password2.upper()}"
+    calc3 = hashlib.md5(raw3.encode()).hexdigest().upper()
+
     print("🧩 verify_signature debug:")
     print("   recv_sig =", recv_sig_up)
     print("   calc1    =", calc1)
     if calc2:
-        print("   calc2    =", calc2, "(➕ SubscriptionId присутствует)")
+        print("   calc2    =", calc2)
+    print("   calc3    =", calc3, "(password2.upper())")
 
-    return recv_sig_up in (calc1, calc2)
+    return recv_sig_up in (calc1, calc2, calc3)
 
 
 @app.post("/robokassa/result")
