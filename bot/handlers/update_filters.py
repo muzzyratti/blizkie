@@ -44,7 +44,7 @@ async def show_update_options(event: types.Message | types.CallbackQuery):
     energy_label = ENERGY_MAP.get(energy_value, energy_value)
     location_label = location_MAP.get(location_value, location_value)
 
-    text = (f"Ваш текущий выбор:\n"
+    text = (f"Ваши текущие параметры:\n\n"
             f"👶 Возраст: {age_value} лет\n"
             f"⏳ Время: {time_label}\n"
             f"⚡️ Энергия: {energy_label}\n"

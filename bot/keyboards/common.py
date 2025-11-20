@@ -1,7 +1,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 start_inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-    InlineKeyboardButton(text="Начнем!", callback_data="start_onboarding")
+    InlineKeyboardButton(text="Настроим всего 4 параметра 👇", callback_data="start_onboarding")
 ]])
 
 favorites_keyboard = InlineKeyboardMarkup(inline_keyboard=[

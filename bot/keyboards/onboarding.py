@@ -24,7 +24,7 @@ time_keyboard = InlineKeyboardMarkup(inline_keyboard=[
 
 energy_keyboard = InlineKeyboardMarkup(inline_keyboard=[
     [
-        InlineKeyboardButton(text="Хочу просто спокойно пообщаться",
+        InlineKeyboardButton(text="Хочу спокойно пообщаться",
                              callback_data="energy_low")
     ],
     [
@@ -33,7 +33,7 @@ energy_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             callback_data="energy_mid")
     ],
     [
-        InlineKeyboardButton(text="Полон сил — хочу подвигаться!",
+        InlineKeyboardButton(text="Полон сил!",
                              callback_data="energy_high")
     ],
 ])

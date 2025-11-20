@@ -18,7 +18,8 @@ async def start_onboarding(callback: types.CallbackQuery):
     log_event(user_id, "onboarding_started", session_id=ctx["session_id"])
 
     await callback.message.answer(
-        "Сколько лет вашему ребёнку? (если их несколько, выбирайте младшего):",
+        "Сколько лет вашему ребёнку?\n\n"
+        "Если их несколько — ориентируемся на младшего.",
         reply_markup=age_keyboard)
     await callback.answer()
 
@@ -49,8 +50,9 @@ async def process_age(callback: types.CallbackQuery):
     mode = ctx.get("mode")
     if mode == "onboarding":
         await callback.message.answer(
-            f"Вы выбрали возрастную группу: {age_min}–{age_max} лет.\n\n"
-            "Сколько у вас есть времени на активность?",
+            f"Отлично! 🙌\n\n"
+            "Сколько у тебя есть времени?\n\n"
+            "Даже 10-15 минут — это уже волшебство ✨",
             reply_markup=time_keyboard)
     elif mode == "update":
         await callback.message.answer("Возраст обновлён. Вот идея для вас 👇")
@@ -77,7 +79,9 @@ async def process_time(callback: types.CallbackQuery):
     mode = ctx.get("mode")
     if mode == "onboarding":
         await callback.message.answer(
-            "Сколько у вас сегодня энергии на игру? (честно 😌)",
+            "Теперь про самое честное 😌\n\n"
+            "Сколько у тебя сегодня сил?\n\n"
+            "Тут нет правильных ответов — я подстроюсь ❤️",
             reply_markup=energy_keyboard)
     elif mode == "update":
         await callback.message.answer("Время обновлено. Вот идея для вас 👇")
@@ -102,7 +106,8 @@ async def process_energy(callback: types.CallbackQuery):
 
     mode = ctx.get("mode")
     if mode == "onboarding":
-        await callback.message.answer("Где будете проводить время?", reply_markup=location_keyboard)
+        await callback.message.answer("Где вы планируете провести время? 🌿\n\n"
+"Дома? На улице? — я подберу идеи под ситуацию.", reply_markup=location_keyboard)
     elif mode == "update":
         await callback.message.answer("Энергия обновлена. Вот идея для вас 👇")
         await show_next_activity(callback)
@@ -137,6 +142,11 @@ async def process_location(callback: types.CallbackQuery):
             "location": ctx["location"]
         }).execute()
 
+        await callback.message.answer(
+            "Класс! Всё настроили 🎉\n\n"
+            "Подбираю идею для вас…"
+        )
+        
         await send_activity(callback)
     elif mode == "update":
         await callback.message.answer("Место обновлено. Вот идея для вас 👇")
