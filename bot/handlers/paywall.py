@@ -135,7 +135,7 @@ def requisites_kb(settings: dict):
 
 
 # ============================================================
-#   ОСНОВНАЯ ФУНКЦИЯ ОТПРАВКИ PAYWALL  (оставлена полностью)
+#   ОСНОВНАЯ ФУНКЦИЯ ОТПРАВКИ PAYWALL
 # ============================================================
 
 async def send_universal_paywall(msg_or_cb, reason: str, user_id: int, session_id: str | None):
@@ -198,14 +198,25 @@ async def on_paywall_back(cb: types.CallbackQuery):
     await cb.answer()
 
 
+# ============================================================
+#   subscribe_click  + goto_robokassa_click
+# ============================================================
+
 @paywall_router.callback_query(F.data == "subscribe")
 async def on_subscribe(cb: types.CallbackQuery):
     """Генерим персональную ссылку Robokassa (Recurring + Receipt) и даём кнопку-URL."""
     settings = get_paywall_settings()
     price = float(settings["price"])
     user_id = cb.from_user.id
+    session_id = user_data.get(user_id, {}).get("session_id")
 
-    log_event(user_id, "subscribe_click", {})
+    # Событие клика по кнопке "Оплатить подписку"
+    log_event(
+        user_id,
+        "subscribe_click",
+        {},
+        session_id=session_id
+    )
 
     pay_url, inv_id = make_payment_link(
         user_id=user_id,
@@ -213,7 +224,14 @@ async def on_subscribe(cb: types.CallbackQuery):
         description="Подписка «Близкие игры», ежемесячно"
     )
 
-    # клавиатура с URL-оплатой
+    # событие перехода в Robokassa
+    log_event(
+        user_id,
+        "goto_robokassa_click",
+        {"origin": "paywall_subscribe"},
+        session_id=session_id
+    )
+
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Перейти к оплате", url=pay_url)],
@@ -226,15 +244,28 @@ async def on_subscribe(cb: types.CallbackQuery):
         reply_markup=kb
     )
 
+
+# ============================================================
+#   open_paywall_direct (из пуша)
+# ============================================================
+
 @paywall_router.callback_query(F.data == "open_paywall_direct")
 async def open_paywall_direct(callback: types.CallbackQuery):
     user_id = callback.from_user.id
+    session_id = user_data.get(user_id, {}).get("session_id")
 
-    # Генерируем ссылку Robokassa
     link, inv_id = make_payment_link(
         user_id=user_id,
         amount_rub=490,
         description="Подписка «Близкие Игры», ежемесячно"
+    )
+
+    # событие перехода из пуша
+    log_event(
+        user_id,
+        "goto_robokassa_click",
+        {"origin": "push_paywall_followup"},
+        session_id=session_id
     )
 
     text = (
