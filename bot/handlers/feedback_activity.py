@@ -30,6 +30,15 @@ async def ask_manual_feedback(callback: types.CallbackQuery):
     activity_id = int(callback.data.split(":")[1])
     keyboard = build_feedback_keyboard(activity_id, source="manual_button")
     await callback.message.answer("💭 Поделитесь, как вам эта идея?", reply_markup=keyboard)
+
+    session_id = user_data.get(callback.from_user.id, {}).get("session_id")
+    log_event(
+        callback.from_user.id,
+        "feedback_leave_button_pushed",
+        {"activity_id": activity_id, "source": "manual_button"},
+        session_id=session_id
+    )
+
     await callback.answer()
 
 
@@ -202,6 +211,14 @@ async def maybe_prompt_auto_feedback(user_id: int, activity_id: int, ctx: dict, 
             reply_markup=kb
         )
 
+        filters, session_id = get_filters_and_session(user_id)
+        log_event(
+            user_id,
+            "feedback_ask_shown",
+            {"activity_id": activity_id, "source": "auto_prompt"},
+            session_id=session_id
+        )
+        
         # фиксируем время последнего авто-запроса
         ctx["last_auto_feedback_at"] = now
 
