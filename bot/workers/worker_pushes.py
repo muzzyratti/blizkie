@@ -103,6 +103,16 @@ async def _process_push(row: dict, cfg: dict, bot):
             "payload": {"weekly": False, "test": True},
         }).execute()
 
+        log_event(
+            user_id,
+            "push_sent_premium_ritual",
+            {
+                "push_id": push_id,
+                "type": push_type,
+                "payload": payload
+            }
+        )
+
     # ----- Premium welcome bypass -----
     if push_type == "premium_welcome":
         logger.info(f"[push_worker] premium_welcome — bypass all limits for push_id={push_id}")
@@ -266,7 +276,7 @@ async def _process_push(row: dict, cfg: dict, bot):
             try:
                 log_event(
                     user_id=user_id,
-                    event_name="push_interview_invite_sent",
+                    event_name="push_sent_interview_invite",
                     event_properties={
                         "push_id": push_id,
                         "photo_url": payload.get("photo_url"),
@@ -301,6 +311,16 @@ async def _process_push(row: dict, cfg: dict, bot):
             "status": "sent",
             "sent_at": _iso(now)
         }).eq("id", push_id).execute()
+
+        log_event(
+            user_id,
+            "push_sent",
+            {
+                "push_id": push_id,
+                "type": push_type,
+                "payload": payload
+            }
+        )
 
         logger.info(f"[push_worker] ✅ Sent push_id={push_id} user={user_id}")
 
