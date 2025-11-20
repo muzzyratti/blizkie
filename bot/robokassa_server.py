@@ -235,7 +235,8 @@ async def robokassa_result(request: Request):
         .select("id")
         .eq("user_id", user_id)
         .eq("type", "premium_welcome")
-        .eq("status", "pending")
+        .in_("status", ["pending", "sent"])
+        .gte("scheduled_at", (now - timedelta(hours=1)).isoformat())
         .execute()
     )
 
