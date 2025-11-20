@@ -142,7 +142,12 @@ async def send_universal_paywall(msg_or_cb, reason: str, user_id: int, session_i
     settings = get_paywall_settings()
     text = _paywall_text(settings)
 
-    log_event(user_id, "paywall_shown", {"reason": reason, "session_id": session_id})
+    log_event(
+        user_id,
+        "paywall_shown",
+        {"reason": reason},
+        session_id=session_id
+    )
 
     ctx = user_data.setdefault(user_id, {})
     ctx["last_paywall_reason"] = reason

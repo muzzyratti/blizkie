@@ -3,6 +3,7 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from utils.amplitude_logger import log_event
 from db.supabase_client import supabase
+from utils.session_tracker import get_current_session_id
 
 cancel_subscription_router = Router()
 
@@ -56,6 +57,8 @@ async def _get_user_email(user_id: int) -> str:
 @cancel_subscription_router.message(Command("cancel_subscription"))
 async def cancel_subscription_cmd(message: types.Message):
     user_id = message.from_user.id
+    session_id = get_current_session_id(user_id)
+
     email = await _get_user_email(user_id)
     email_display = email if email else f"user_id {user_id}"
 
@@ -65,11 +68,14 @@ async def cancel_subscription_cmd(message: types.Message):
         parse_mode="HTML",
         disable_web_page_preview=True
     )
-    log_event(user_id, "subscription.cancel_info_shown.cmd")
+    log_event(user_id, "cancel_subscription_info_shown", session_id=session_id)
+
 
 @cancel_subscription_router.message(F.text == "/cancel_subscription")
 async def cancel_subscription_text(message: types.Message):
     user_id = message.from_user.id
+    session_id = get_current_session_id(user_id)
+
     email = await _get_user_email(user_id)
     email_display = email if email else f"user_id {user_id}"
 
@@ -79,4 +85,5 @@ async def cancel_subscription_text(message: types.Message):
         parse_mode="HTML",
         disable_web_page_preview=True
     )
-    log_event(user_id, "subscription.cancel_info_shown.text")
+    log_event(user_id, "cancel_subscription_info_shown", session_id=session_id)
+

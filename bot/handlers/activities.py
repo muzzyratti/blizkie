@@ -277,7 +277,20 @@ async def show_next_activity(callback: types.CallbackQuery):
         await callback.message.answer(text, parse_mode="Markdown",
                                       reply_markup=keyboard,
                                       disable_web_page_preview=True)
-
+    amplitude_log_event(
+        user_id=user_id,
+        event_name="show_activity_L0",
+        event_properties={
+            "activity_id": activity["id"],
+            "age_min": ctx["age_min"],
+            "age_max": ctx["age_max"],
+            "time_required": ctx["time_required"],
+            "energy": ctx["energy"],
+            "location": ctx["location"]
+        },
+        session_id=session_id
+    )
+    
     supabase.table("seen_activities").upsert({
         "user_id": user_id,
         "activity_id": activity["id"],
@@ -349,6 +362,20 @@ async def next_command_handler(message: types.Message):
                              reply_markup=keyboard,
                              disable_web_page_preview=True)
 
+    amplitude_log_event(
+        user_id=user_id,
+        event_name="show_activity_L0_next_command",
+        event_properties={
+            "activity_id": activity["id"],
+            "age_min": ctx["age_min"],
+            "age_max": ctx["age_max"],
+            "time_required": ctx["time_required"],
+            "energy": ctx["energy"],
+            "location": ctx["location"]
+        },
+        session_id=session_id
+    )
+    
     supabase.table("seen_activities").upsert({
         "user_id": user_id,
         "activity_id": activity["id"],
