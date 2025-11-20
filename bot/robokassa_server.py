@@ -93,7 +93,7 @@ async def robokassa_result(request: Request):
     print("🟡 Content-Type:", content_type)
     print("🟡 RAW body (cached):", raw_body[:500])
 
-    # 0) JSON/JWS → игнорируем (PaymentStateNotification)
+    # 0) Любой JSON/JWT → игнорируем (PaymentStateNotification)
     if "application/json" in content_type or raw_body.strip().startswith("eyJ"):
         print("⚠️ JSON/JWS PaymentStateNotification → игнорируем → 200 OK")
         return Response("OK", media_type="text/plain")
@@ -107,7 +107,7 @@ async def robokassa_result(request: Request):
     except Exception:
         params = {}
 
-    # 2) Если form пустой — парсим тело
+    # 2) Если form пустой — парсим закэшированное тело
     if not params:
         tmp = {}
         for p in raw_body.split("&"):
@@ -156,24 +156,21 @@ async def robokassa_result(request: Request):
         or params.get("out_summ")
         or "0"
     )
-    amount_rub = float(out_sum_raw)
+    out_sum_rub = float(out_sum_raw)
+    amount_rub = out_sum_rub
 
     now = datetime.now(timezone.utc)
     next_month = now + timedelta(days=30)
     email = params.get("EMail") or params.get("Email")
 
     # ------------------------------
-    # FIRST / RECURRING (Robokassa confirmed: all same format)
+    # ID подписки (если когда-нибудь появится)
     # ------------------------------
     subscription_id = (
         params.get("SubscriptionId")
         or params.get("subscriptionid")
         or None
     )
-
-    # Робокасса подтверждает: recurring формально НЕ ОТЛИЧИТЬ
-    is_recurring = False
-    is_first = True
 
     # ------------------------------
     # PAYMENTS
@@ -207,6 +204,30 @@ async def robokassa_result(request: Request):
         payment_id = sel.data["id"]
 
     # ------------------------------
+    # FIRST / RECURRING НА ОСНОВЕ БД
+    # ------------------------------
+    # Если есть другие успешные платежи подписки этого пользователя → recurring
+    try:
+        prev = (
+            supabase.table("payments")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("provider", "robokassa")
+            .eq("kind", "subscription")
+            .eq("status", "paid")
+            .neq("id", payment_id)
+            .limit(1)
+            .execute()
+        )
+        has_prev = bool(prev.data)
+        is_first = not has_prev
+        is_recurring = has_prev
+    except Exception as e:
+        print("⚠️ first/recurring detect failed:", e)
+        is_first = True
+        is_recurring = False
+
+    # ------------------------------
     # USER SUBSCRIPTIONS
     # ------------------------------
     plan_name = rk.get("plan_name", "monthly")
@@ -226,7 +247,7 @@ async def robokassa_result(request: Request):
     ).execute()
 
     # ------------------------------
-    # LOG EVENT
+    # LOG EVENT В AMPLITUDE
     # ------------------------------
     try:
         log_event(
@@ -268,7 +289,7 @@ async def robokassa_result(request: Request):
                 "type": "premium_welcome",
                 "status": "pending",
                 "scheduled_at": now.isoformat(),
-                "payload": {"amount_rub": amount_rub},
+                "payload": {"amount_rub": out_sum_rub},
             }
         ).execute()
         print(f"✅ premium_welcome добавлен в очередь для user={user_id}")
@@ -312,4 +333,20 @@ async def robokassa_success(request: Request):
         "Секунду… проверяю статус подписки.",
         f"payment_ok_{inv_id}",
     )
-    return HTMLResp
+    return HTMLResponse(content=html)
+
+
+@app.get("/robokassa/fail")
+async def robokassa_fail(request: Request):
+    inv_id = request.query_params.get("InvId", "")
+    html = _html_back_to_bot(
+        "Оплата не завершена",
+        "Если это ошибка — вернёмся в бот и попробуем ещё раз.",
+        f"payment_fail_{inv_id}",
+    )
+    return HTMLResponse(content=html)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
