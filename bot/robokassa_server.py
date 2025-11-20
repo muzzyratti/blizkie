@@ -247,12 +247,33 @@ async def robokassa_result(request: Request):
     ).execute()
 
     # ------------------------------
+    # CLEAR paywall_followup after subscription activation
+    # ------------------------------
+    try:
+        supabase.table("push_queue") \
+            .delete() \
+            .eq("user_id", user_id) \
+            .eq("type", "paywall_followup") \
+            .eq("status", "pending") \
+            .execute()
+
+        print(f"🧹 Cleared pending paywall_followup for user={user_id}")
+    except Exception as e:
+        print(f"⚠️ Failed to clear paywall_followup for user={user_id}: {e}")
+    
+    # ------------------------------
     # LOG EVENT В AMPLITUDE
     # ------------------------------
     try:
+        event_name = (
+            "subscription_binding_received"
+            if subscription_id
+            else "subscription_payment_received"
+        )
+
         log_event(
             user_id,
-            "subscription_payment_received",
+            event_name,
             {
                 "invoice_id": inv_id,
                 "amount_rub": amount_rub,
