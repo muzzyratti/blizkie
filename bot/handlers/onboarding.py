@@ -28,6 +28,7 @@ async def start_onboarding(callback: types.CallbackQuery):
 async def process_age(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     ctx = ensure_filters(user_id)
+    username = callback.from_user.username
     age_data = callback.data.replace("age_", "")
 
     if age_data == "3_4":
@@ -58,6 +59,7 @@ async def process_age(callback: types.CallbackQuery):
         await callback.message.answer("Возраст обновлён. Вот идея для вас 👇")
         await show_next_activity(callback)
         supabase.table("user_filters").update({
+            "username": username,
             "age_min": age_min,
             "age_max": age_max
         }).eq("user_id", user_id).execute()
@@ -69,6 +71,7 @@ async def process_age(callback: types.CallbackQuery):
 async def process_time(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     ctx = ensure_filters(user_id)
+    username = callback.from_user.username
     time_choice = callback.data.split("_")[1]
 
     ctx["time_required"] = time_choice
@@ -87,6 +90,7 @@ async def process_time(callback: types.CallbackQuery):
         await callback.message.answer("Время обновлено. Вот идея для вас 👇")
         await show_next_activity(callback)
         supabase.table("user_filters").update({
+            "username": username,
             "time_required": time_choice
         }).eq("user_id", user_id).execute()
 
@@ -97,6 +101,7 @@ async def process_time(callback: types.CallbackQuery):
 async def process_energy(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     ctx = ensure_filters(user_id)
+    username = callback.from_user.username
     energy_choice = callback.data.split("_")[1]
 
     ctx["energy"] = energy_choice
@@ -106,12 +111,15 @@ async def process_energy(callback: types.CallbackQuery):
 
     mode = ctx.get("mode")
     if mode == "onboarding":
-        await callback.message.answer("Где вы планируете провести время? 🌿\n\n"
-"Дома? На улице? — я подберу идеи под ситуацию.", reply_markup=location_keyboard)
+        await callback.message.answer(
+            "Где вы планируете провести время? 🌿\n\n"
+            "Дома? На улице? — я подберу идеи под ситуацию.",
+            reply_markup=location_keyboard)
     elif mode == "update":
         await callback.message.answer("Энергия обновлена. Вот идея для вас 👇")
         await show_next_activity(callback)
         supabase.table("user_filters").update({
+            "username": username,
             "energy": energy_choice
         }).eq("user_id", user_id).execute()
 
@@ -122,6 +130,7 @@ async def process_energy(callback: types.CallbackQuery):
 async def process_location(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     ctx = ensure_filters(user_id)
+    username = callback.from_user.username
     location_choice = callback.data.split("_")[1]
 
     ctx["location"] = location_choice
@@ -135,6 +144,7 @@ async def process_location(callback: types.CallbackQuery):
 
         supabase.table("user_filters").upsert({
             "user_id": user_id,
+            "username": username,
             "age_min": ctx["age_min"],
             "age_max": ctx["age_max"],
             "time_required": ctx["time_required"],
@@ -146,12 +156,13 @@ async def process_location(callback: types.CallbackQuery):
             "Класс! Всё настроили 🎉\n\n"
             "Подбираю идею для вас…"
         )
-        
+
         await send_activity(callback)
     elif mode == "update":
         await callback.message.answer("Место обновлено. Вот идея для вас 👇")
         await show_next_activity(callback)
         supabase.table("user_filters").update({
+            "username": username,
             "location": location_choice
         }).eq("user_id", user_id).execute()
 
@@ -171,7 +182,7 @@ async def continue_with_saved_filters(callback: types.CallbackQuery):
         await callback.answer()
         return
 
-    # Обновляем фильтры в памяти, session_id сохраняется
+    # Обновляем фильтры в памяти
     ctx.update({
         "age_min": filters["age_min"],
         "age_max": filters["age_max"],
