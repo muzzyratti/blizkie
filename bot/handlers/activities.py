@@ -57,9 +57,9 @@ async def send_activity(callback: types.CallbackQuery):
             f"📦 Материалы: {activity['materials'] or 'Не требуются'}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Расскажи как играть", callback_data=f"activity_details:{activity['id']}")],
+        [InlineKeyboardButton(text="Играем ▶️", callback_data=f"activity_details:{activity['id']}")],
         [InlineKeyboardButton(text="Следующую ⏩️", callback_data="activity_next")],
-        [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")]
+        [InlineKeyboardButton(text="Поменять фильтры 🎛️", callback_data="update_filters")]
     ])
 
     amplitude_log_event(
@@ -126,11 +126,24 @@ async def show_activity_details(callback: types.CallbackQuery):
 
     summary = "\n".join([f"💡 {s}" for s in (activity.get("summary") or [])])
     caption = f"🎲 *{activity['title']}*"
+    author = activity.get("author")
+    author_url = activity.get("source_url")
+
+    author_block = ""
+    if author and author_url:
+        author_block = f"\n\n[{author}]({author_url})"
+
+    ugc_block = (
+        "\n\n💡 Есть идея классной игры? Расскажите о ней — и мы опубликуем её в боте с ссылкой на твой канал! 👉 /suggest\n"
+    )
+
     text = (
         f"⏱️ {activity['time_required']} • ⚡️ {activity['energy']} • 📍 {activity['location']}\n\n"
         f"Материалы: {activity['materials'] or 'Не требуются'}\n\n"
         f"{activity['full_description']}\n\n"
         f"{summary}"
+        f"{author_block}"
+        f"{ugc_block}"
     )
 
     # Сохраняем оригинальные тексты для корректного изменения клавиатуры
@@ -145,7 +158,7 @@ async def show_activity_details(callback: types.CallbackQuery):
             text="Добавить в любимые ❤️" if not is_favorite else "Убрать из любимых ✖️",
             callback_data=f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}")],
         [InlineKeyboardButton(text="Следующую ⏩️", callback_data="activity_next")],
-        [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")],
+        [InlineKeyboardButton(text="Поменять фильтры 🎛️", callback_data="update_filters")],
         [InlineKeyboardButton(text="Поделитесь этой идеей ↩️", callback_data=f"share_activity:{activity_id}")],
         [InlineKeyboardButton(text="💬 Оставить отзыв", callback_data=f"feedback_button:{activity_id}")]
     ])
@@ -268,10 +281,10 @@ async def show_next_activity(callback: types.CallbackQuery):
             f"📦 Материалы: {activity['materials'] or 'Не требуются'}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Расскажи как играть",
+        [InlineKeyboardButton(text="Играем ▶️",
                               callback_data=f"activity_details:{activity['id']}")],
         [InlineKeyboardButton(text="Следующую ⏩️", callback_data="activity_next")],
-        [InlineKeyboardButton(text="Хочу другие фильтры",
+        [InlineKeyboardButton(text="Поменять фильтры 🎛️",
                               callback_data="update_filters")]
     ])
 
@@ -351,11 +364,11 @@ async def next_command_handler(message: types.Message):
             f"📦 Материалы: {activity['materials'] or 'Не требуются'}")
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Расскажи как играть",
+        [InlineKeyboardButton(text="Играем ▶️",
                               callback_data=f"activity_details:{activity['id']}")],
         [InlineKeyboardButton(text="Следующую ⏩️",
                               callback_data="activity_next")],
-        [InlineKeyboardButton(text="Хочу другие фильтры",
+        [InlineKeyboardButton(text="Поменять фильтры 🎛️",
                               callback_data="update_filters")]
     ])
 

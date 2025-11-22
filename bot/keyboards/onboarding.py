@@ -45,13 +45,13 @@ location_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
 
 # клавиатура под L0 карточкой
 activity_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-    InlineKeyboardButton(text="Расскажи как играть",
+    InlineKeyboardButton(text="Играем ▶️",
                          callback_data="activity_details")
 ], [
-    InlineKeyboardButton(text="Покажи ещё идею", callback_data="activity_next")
+    InlineKeyboardButton(text="Следующую ⏩️", callback_data="activity_next")
 ]])
 
 # клавиатура под L1 карточкой
 activity_l1_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-    InlineKeyboardButton(text="Покажи ещё идею", callback_data="activity_next")
+    InlineKeyboardButton(text="Следующую ⏩️", callback_data="activity_next")
 ]])
