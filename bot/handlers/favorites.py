@@ -152,70 +152,99 @@ async def favorite_add(callback: types.CallbackQuery):
     await callback.answer("Добавлено в любимые ❤️")
 
 
-async def list_favorites(message_or_callback: types.Message
-                         | types.CallbackQuery):
+async def list_favorites(message_or_callback: types.Message | types.CallbackQuery):
     user_id = message_or_callback.from_user.id
 
+    async def _send(mc, text, **kwargs):
+        if isinstance(mc, types.CallbackQuery):
+            return await mc.message.answer(text, **kwargs)
+        else:
+            return await mc.answer(text, **kwargs)
+
+    async def _edit_or_send(mc, text):
+        if isinstance(mc, types.CallbackQuery):
+            try:
+                await mc.message.edit_text(text)
+            except Exception:
+                await mc.message.answer(text)
+            await mc.answer()
+        else:
+            await mc.answer(text)
+
+    # Логирование
     try:
-        log_event(user_id=user_id,
-                  event_name="favourites_list",
-                  session_id=user_data.get(user_id, {}).get("session_id"))
+        log_event(
+            user_id=user_id,
+            event_name="favourites_list",
+            session_id=user_data.get(user_id, {}).get("session_id")
+        )
     except Exception as e:
         print(f"[Amplitude] Failed to log favourites_list: {e}")
 
-    favorites_response = supabase.table("favorites") \
-        .select("activity_id") \
-        .eq("user_id", user_id) \
-        .order("created_at", desc=True) \
+    # Загружаем favorities
+    favorites_response = (
+        supabase.table("favorites")
+        .select("activity_id")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
         .execute()
+    )
 
     if not favorites_response.data:
-        text = "У вас пока нет любимых активностей 🌱"
-        if isinstance(message_or_callback, types.CallbackQuery):
-            try:
-                await message_or_callback.message.edit_text(text)
-            except Exception:
-                await message_or_callback.message.answer(text)
-            await message_or_callback.answer()
-        else:
-            await message_or_callback.answer(text)
-        return
+        return await _edit_or_send(message_or_callback, "У вас пока нет любимых активностей 🌱")
 
     activity_ids = [fav["activity_id"] for fav in favorites_response.data]
 
-    activities_response = supabase.table("activities") \
-        .select("*") \
-        .in_("id", activity_ids) \
+    activities_response = (
+        supabase.table("activities")
+        .select("*")
+        .in_("id", activity_ids)
         .execute()
+    )
 
     if not activities_response.data:
-        await message_or_callback.answer("Не удалось загрузить активности 😔")
-        return
+        return await _send(message_or_callback, "Не удалось загрузить активности 😔")
 
     id_to_activity = {a["id"]: a for a in activities_response.data}
     sorted_activities = [
         id_to_activity[aid] for aid in activity_ids if aid in id_to_activity
     ]
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text=activity["title"],
-            callback_data=f"activity_details:{activity['id']}"),
-        InlineKeyboardButton(text="✖️",
-                             callback_data=f"remove_fav:{activity['id']}")
-    ] for activity in sorted_activities])
+    # Заголовок
+    await _edit_or_send(message_or_callback, "Ваши любимые активности:")
 
-    if isinstance(message_or_callback, types.CallbackQuery):
-        try:
-            await message_or_callback.message.edit_text(
-                "Ваши любимые активности:", reply_markup=keyboard)
-        except Exception:
-            await message_or_callback.message.answer(
-                "Ваши любимые активности:", reply_markup=keyboard)
-        await message_or_callback.answer()
-    else:
-        await message_or_callback.answer("Ваши любимые активности:",
-                                         reply_markup=keyboard)
+    # Отправляем каждую карточку
+    for activity in sorted_activities:
+        title = activity["title"]
+        age = f"{activity.get('age_min', '?')}–{activity.get('age_max', '?')} лет"
+        time_required = activity.get("time_required") or "-"
+        energy = activity.get("energy") or "-"
+        location = activity.get("location") or "-"
+
+        text = (
+            f"🎮 *{title}*\n"
+            f"{age} • {time_required} • {energy} • {location}"
+        )
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="👉 Показать идею",
+                        callback_data=f"activity_details:{activity['id']}"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="❌ Убрать из любимых",
+                        callback_data=f"remove_fav:{activity['id']}"
+                    )
+                ]
+            ]
+        )
+
+        await _send(message_or_callback, text, parse_mode="Markdown", reply_markup=keyboard)
+
 
 
 @favorites_router.message(Command("favorites"))
@@ -228,6 +257,7 @@ async def remove_favorite(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     activity_id = int(callback.data.split(":")[1])
 
+    # Удаляем запись
     supabase.table("favorites") \
         .delete() \
         .eq("user_id", user_id) \
@@ -235,11 +265,31 @@ async def remove_favorite(callback: types.CallbackQuery):
         .execute()
 
     try:
-        log_event(user_id=user_id,
-                  event_name="favourites_remove",
-                  event_properties={"activity_id": activity_id},
-                  session_id=user_data.get(user_id, {}).get("session_id"))
+        log_event(
+            user_id=user_id,
+            event_name="favourites_remove",
+            event_properties={"activity_id": activity_id},
+            session_id=user_data.get(user_id, {}).get("session_id"),
+        )
     except Exception as e:
         print(f"[Amplitude] Failed to log favourites_remove: {e}")
 
-    await list_favorites(callback)
+    # Удаляем карточку без текста (replace message with empty message)
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    # Проверяем, остались ли любимые
+    favorites_response = (
+        supabase.table("favorites")
+        .select("activity_id")
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    # Если больше нет — показываем текст
+    if not favorites_response.data:
+        await callback.message.answer("У вас пока нет любимых активностей 🌱")
+
+    await callback.answer()
