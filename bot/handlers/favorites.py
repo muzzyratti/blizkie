@@ -60,7 +60,7 @@ async def favorite_add(callback: types.CallbackQuery):
             ],
             [
                 InlineKeyboardButton(
-                    text="Покажи еще идею",
+                    text="Следующую ⏩️",
                     callback_data="activity_next",
                 )
             ],
@@ -72,7 +72,7 @@ async def favorite_add(callback: types.CallbackQuery):
             ],
             [
                 InlineKeyboardButton(
-                    text="Поделиться идеей 💌",
+                    text="Поделитесь этой идеей ↩️",
                     callback_data=f"share_activity:{activity_id}",
                 )
             ],
@@ -335,7 +335,7 @@ async def remove_favorite(callback: types.CallbackQuery):
             ],
             [
                 InlineKeyboardButton(
-                    text="Покажи еще идею",
+                    text="Следующую ⏩️",
                     callback_data="activity_next",
                 )
             ],
@@ -347,7 +347,7 @@ async def remove_favorite(callback: types.CallbackQuery):
             ],
             [
                 InlineKeyboardButton(
-                    text="Поделиться идеей 💌",
+                    text="Поделитесь этой идеей ↩️",
                     callback_data=f"share_activity:{activity_id}",
                 )
             ],

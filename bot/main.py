@@ -18,6 +18,7 @@ from handlers.paywall import paywall_router
 from utils.session_tracker import sync_sessions_to_db
 from workers.worker_pushes import run_worker
 from middleware.activity_middleware import ActivityMiddleware
+from handlers.suggest_game import suggest_router
 
 # === ДОБАВЛЕНО: импорт для восстановления weekly пушей ===
 from utils.push_scheduler import schedule_premium_ritual
@@ -31,9 +32,10 @@ async def set_bot_commands(bot):
         BotCommand(command="start", description="🚀 Начать заново"),
         BotCommand(command="next", description="🎲 Показать ещё идею"),
         BotCommand(command="favorites", description="❤️ Мои любимые идеи"),
-        BotCommand(command="update_filters", description="🎛️ Хочу другие фильтры"),
-        BotCommand(command="feedback", description="🧸 Поделиться мнением или ошибкой"),
-        BotCommand(command="subscribe", description="📢 Подписаться на канал"),
+        BotCommand(command="update_filters", description="🎛️ Поменять фильтры"),
+        BotCommand(command="suggest", description="🧩 Предложить свою игру"),
+        BotCommand(command="feedback", description="❓ Рассказать об ошибке или предложении"),
+        BotCommand(command="subscribe", description="📢 Подписаться на телеграм-канал"),
         BotCommand(command="donate", description="💛 Поддержать проект"),
         BotCommand(command="cancel_subscription", description="❌ Отменить подписку"),
     ]
@@ -81,11 +83,13 @@ async def main():
     dp.include_router(share_router)
     dp.include_router(update_filters_router)
     dp.include_router(feedback_router)
+    dp.include_router(suggest_router)
     dp.include_router(subscribe_router)
     dp.include_router(donate_router)
     dp.include_router(cancel_subscription_router)
     dp.include_router(paywall_router)
     dp.include_router(feedback_activity_router)
+    
 
     logger.info("Устанавливаем команды бота...")
     await set_bot_commands(bot)

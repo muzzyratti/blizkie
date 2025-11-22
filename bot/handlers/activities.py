@@ -58,7 +58,7 @@ async def send_activity(callback: types.CallbackQuery):
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Расскажи как играть", callback_data=f"activity_details:{activity['id']}")],
-        [InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")],
+        [InlineKeyboardButton(text="Следующую ⏩️", callback_data="activity_next")],
         [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")]
     ])
 
@@ -144,9 +144,9 @@ async def show_activity_details(callback: types.CallbackQuery):
         [InlineKeyboardButton(
             text="Добавить в любимые ❤️" if not is_favorite else "Убрать из любимых ✖️",
             callback_data=f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}")],
-        [InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")],
+        [InlineKeyboardButton(text="Следующую ⏩️", callback_data="activity_next")],
         [InlineKeyboardButton(text="Хочу другие фильтры", callback_data="update_filters")],
-        [InlineKeyboardButton(text="Поделиться идеей 💌", callback_data=f"share_activity:{activity_id}")],
+        [InlineKeyboardButton(text="Поделитесь этой идеей ↩️", callback_data=f"share_activity:{activity_id}")],
         [InlineKeyboardButton(text="💬 Оставить отзыв", callback_data=f"feedback_button:{activity_id}")]
     ])
 
@@ -270,7 +270,7 @@ async def show_next_activity(callback: types.CallbackQuery):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Расскажи как играть",
                               callback_data=f"activity_details:{activity['id']}")],
-        [InlineKeyboardButton(text="Покажи еще идею", callback_data="activity_next")],
+        [InlineKeyboardButton(text="Следующую ⏩️", callback_data="activity_next")],
         [InlineKeyboardButton(text="Хочу другие фильтры",
                               callback_data="update_filters")]
     ])
@@ -353,7 +353,7 @@ async def next_command_handler(message: types.Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Расскажи как играть",
                               callback_data=f"activity_details:{activity['id']}")],
-        [InlineKeyboardButton(text="Покажи еще идею",
+        [InlineKeyboardButton(text="Следующую ⏩️",
                               callback_data="activity_next")],
         [InlineKeyboardButton(text="Хочу другие фильтры",
                               callback_data="update_filters")]

@@ -28,7 +28,7 @@ async def share_activity(callback: types.CallbackQuery):
     full_description = activity.get('full_description', '')
     summary_lines = "\n".join(
         [f"💡 {s}" for s in (activity.get("summary") or [])])
-    footer = "👉 Такие идеи даёт бот @blizkie\\_igry\\_bot — посмотрите, вдруг откликнется"
+    footer = "👉 Такие идеи даёт бот @blizkie\\_igry\\_bot — там быстро найдете что поделать с ребёнком прямо сейчас."
 
     materials_text = f"📦 Материалы: {materials}\n\n" if materials else ""
 
