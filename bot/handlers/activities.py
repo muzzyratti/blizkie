@@ -133,6 +133,13 @@ async def show_activity_details(callback: types.CallbackQuery):
         f"{summary}"
     )
 
+    # Сохраняем оригинальные тексты для корректного изменения клавиатуры
+    user_state = user_data.setdefault(user_id, {})
+    user_state["current_activity_text"] = {
+        "caption": caption,
+        "text": text
+    }
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="Добавить в любимые ❤️" if not is_favorite else "Убрать из любимых ✖️",
