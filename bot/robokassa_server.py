@@ -85,7 +85,6 @@ async def robokassa_result(request: Request):
     rk = get_rk_settings()
     password2 = rk["password2"]
 
-    # Читаем тело ТОЛЬКО один раз
     raw_body = (await request.body()).decode(errors="ignore")
     content_type = (request.headers.get("content-type") or "").lower()
 
@@ -93,7 +92,7 @@ async def robokassa_result(request: Request):
     print("🟡 Content-Type:", content_type)
     print("🟡 RAW body (cached):", raw_body[:500])
 
-    # 0) Любой JSON/JWT → игнорируем (PaymentStateNotification)
+    # 0) JSON/JWT → игнорируем
     if "application/json" in content_type or raw_body.strip().startswith("eyJ"):
         print("⚠️ JSON/JWS PaymentStateNotification → игнорируем → 200 OK")
         return Response("OK", media_type="text/plain")
@@ -107,7 +106,7 @@ async def robokassa_result(request: Request):
     except Exception:
         params = {}
 
-    # 2) Если form пустой — парсим закэшированное тело
+    # 2) Если form пустой — fallback парсинг
     if not params:
         tmp = {}
         for p in raw_body.split("&"):
@@ -118,7 +117,7 @@ async def robokassa_result(request: Request):
 
     print("🟡 Robokassa RESULT received params:", params)
 
-    # --- Проверка подписи ---
+    # Проверка подписи
     if not verify_signature(params, password2):
         print("❌ Invalid signature")
         return Response("Invalid signature", status_code=400)
@@ -143,13 +142,32 @@ async def robokassa_result(request: Request):
     user_id = int(user_id_raw)
 
     # ------------------------------
+    # username из user_sessions
+    # ------------------------------
+    username = None
+    try:
+        sess = (
+            supabase.table("user_sessions")
+            .select("username")
+            .eq("user_id", user_id)
+            .order("last_seen", desc=True)
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        if sess.data:
+            username = sess.data.get("username")
+    except Exception as e:
+        print("⚠️ username lookup failed:", e)
+
+    # ------------------------------
     # invoice id
     # ------------------------------
     inv_id_val = params.get("InvId") or params.get("inv_id")
     inv_id = str(inv_id_val)
 
     # ------------------------------
-    # сумма платежа
+    # сумма
     # ------------------------------
     out_sum_raw = (
         params.get("OutSum")
@@ -163,9 +181,6 @@ async def robokassa_result(request: Request):
     next_month = now + timedelta(days=30)
     email = params.get("EMail") or params.get("Email")
 
-    # ------------------------------
-    # ID подписки (если когда-нибудь появится)
-    # ------------------------------
     subscription_id = (
         params.get("SubscriptionId")
         or params.get("subscriptionid")
@@ -178,6 +193,7 @@ async def robokassa_result(request: Request):
     up = supabase.table("payments").upsert(
         {
             "user_id": user_id,
+            "username": username,    # 👈 добавлено
             "provider": "robokassa",
             "kind": "subscription",
             "amount_rub": amount_rub,
@@ -204,9 +220,8 @@ async def robokassa_result(request: Request):
         payment_id = sel.data["id"]
 
     # ------------------------------
-    # FIRST / RECURRING НА ОСНОВЕ БД
+    # FIRST / RECURRING
     # ------------------------------
-    # Если есть другие успешные платежи подписки этого пользователя → recurring
     try:
         prev = (
             supabase.table("payments")
@@ -235,6 +250,7 @@ async def robokassa_result(request: Request):
     supabase.table("user_subscriptions").upsert(
         {
             "user_id": user_id,
+            "username": username,    # 👈 добавлено
             "plan_name": plan_name,
             "auto_renew": True,
             "is_active": True,
@@ -247,7 +263,7 @@ async def robokassa_result(request: Request):
     ).execute()
 
     # ------------------------------
-    # CLEAR paywall_followup after subscription activation
+    # CLEAR paywall_followup
     # ------------------------------
     try:
         supabase.table("push_queue") \
@@ -260,7 +276,7 @@ async def robokassa_result(request: Request):
         print(f"🧹 Cleared pending paywall_followup for user={user_id}")
     except Exception as e:
         print(f"⚠️ Failed to clear paywall_followup for user={user_id}: {e}")
-    
+
     # ------------------------------
     # LOG EVENT В AMPLITUDE
     # ------------------------------
@@ -289,7 +305,7 @@ async def robokassa_result(request: Request):
     print("✅ Payment processed OK", inv_id)
 
     # ------------------------------
-    # SINGLE premium_welcome PUSH (без дублей)
+    # SINGLE premium_welcome PUSH
     # ------------------------------
     existing = (
         supabase.table("push_queue")

@@ -32,10 +32,20 @@ def get_current_session_id(user_id: int) -> str | None:
     ctx = user_data.get(user_id)
     return ctx.get("session_id") if ctx else None
 
-def touch_user_activity(user_id: int, *, source: str | None = None, device_info: dict | None = None):
+def touch_user_activity(
+    user_id: int,
+    *,
+    source: str | None = None,
+    device_info: dict | None = None,
+    username: str | None = None,
+):
     now = _utcnow()
     ctx = user_data.setdefault(user_id, {})
 
+    # 👇 сохраняем последний известный username, если он есть
+    if username is not None:
+        ctx["username"] = username
+    
     # Нормализация
     for key in ("created_at", "last_seen"):
         v = ctx.get(key)
@@ -91,11 +101,33 @@ def touch_user_activity(user_id: int, *, source: str | None = None, device_info:
     logger.info(f"[session] 🆕 New session created for user={user_id}")
 
 
-def mark_seen(user_id: int, *, source: str | None = None, device_info: dict | None = None):
-    return touch_user_activity(user_id, source=source, device_info=device_info)
+def mark_seen(
+    user_id: int,
+    *,
+    source: str | None = None,
+    device_info: dict | None = None,
+    username: str | None = None,
+):
+    return touch_user_activity(
+        user_id,
+        source=source,
+        device_info=device_info,
+        username=username,
+    )
 
-def new_session_if_needed(user_id: int, *, source: str | None = None, device_info: dict | None = None):
-    return touch_user_activity(user_id, source=source, device_info=device_info)
+def new_session_if_needed(
+    user_id: int,
+    *,
+    source: str | None = None,
+    device_info: dict | None = None,
+    username: str | None = None,
+):
+    return touch_user_activity(
+        user_id,
+        source=source,
+        device_info=device_info,
+        username=username,
+    )
 
 async def sync_sessions_to_db():
     timeout = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
@@ -153,6 +185,7 @@ async def sync_sessions_to_db():
                 session_data = {
                     "session_id": sid,
                     "user_id": user_id,
+                    "username": ctx.get("username"),   # 👈 новое поле
                     "started_at": _iso(created_at),
                     "last_seen": _iso(last_seen),
                     "ended_at": _iso(ended_at),

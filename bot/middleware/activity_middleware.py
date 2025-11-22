@@ -1,30 +1,38 @@
-# middleware/activity_middleware.py
-
 from aiogram import BaseMiddleware
 from aiogram.types import Update
-
 from utils.session_tracker import mark_seen, new_session_if_needed
 
 
 class ActivityMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
 
-        user_id = None
+        from_user = None
 
-        if hasattr(event, "from_user") and event.from_user:
-            user_id = event.from_user.id
+        # 1) message
+        if hasattr(event, "message") and event.message:
+            from_user = event.message.from_user
 
-        elif hasattr(event, "message") and event.message and event.message.from_user:
-            user_id = event.message.from_user.id
+        # 2) callback
+        elif hasattr(event, "callback_query") and event.callback_query:
+            from_user = event.callback_query.from_user
 
-        elif hasattr(event, "callback_query") and event.callback_query.from_user:
-            user_id = event.callback_query.from_user.id
+        # 3) generic
+        elif hasattr(event, "from_user"):
+            from_user = event.from_user
 
-        if user_id:
-            # Отметка активности
-            mark_seen(user_id, source="tg")
+        # ❗ Если нет юзера — игнор
+        if not from_user:
+            return await handler(event, data)
 
-            # Проверка — нужна ли новая сессия
-            new_session_if_needed(user_id)
+        user_id = from_user.id
+        username = from_user.username
+
+        # ❗❗ КЛЮЧ: если это сам бот — не трекать
+        if from_user.is_bot:
+            return await handler(event, data)
+
+        # Только обычные пользователи попадают сюда
+        mark_seen(user_id, source="tg", username=username)
+        new_session_if_needed(user_id, source="tg", username=username)
 
         return await handler(event, data)

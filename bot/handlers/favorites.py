@@ -66,7 +66,7 @@ async def favorite_add(callback: types.CallbackQuery):
             ],
             [
                 InlineKeyboardButton(
-                    text="Поменять фильтры",
+                    text="Поменять фильтры 🎛️",
                     callback_data="update_filters",
                 )
             ],
