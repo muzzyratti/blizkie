@@ -10,17 +10,25 @@ from utils.push_scheduler import (
     schedule_retention_nudges_subscribers,
     schedule_interview_invite,
 )
-
 from utils.paywall_guard import is_user_limited, is_premium
+from db.feature_flags import get_flag  # 👈 добавили импорт
 
 logger = setup_logger()
 
-# Тест: 1 мин и 30 сек. В проде верни 30 мин и 180 сек.
-SESSION_TIMEOUT_MINUTES = 1
-SYNC_INTERVAL_SECONDS = 30
+# ============================================================
+#   ДЕФОЛТЫ НА СЛУЧАЙ, ЕСЛИ feature_flags НЕДОСТУПЕН
+#   (прод: 30 мин и 180 сек, как ты просил)
+# ============================================================
+SESSION_TIMEOUT_MINUTES = 30
+SYNC_INTERVAL_SECONDS = 180
+
+# ключ в feature_flags
+_SESSION_CFG_KEY = "session_tracker_config"
+
 
 def _utcnow():
     return datetime.now(timezone.utc)
+
 
 def _iso(dt: datetime | None) -> str | None:
     if not dt:
@@ -28,9 +36,87 @@ def _iso(dt: datetime | None) -> str | None:
     dt = dt.astimezone(timezone.utc)
     return dt.isoformat().replace("+00:00", "Z")
 
+
+# ============================================================
+#  ЗАГРУЗКА НАСТРОЕК ИЗ feature_flags
+#  value_json ожидаем такого вида:
+#
+#  {
+#    "SESSION_TIMEOUT_MINUTES": 30,
+#    "SYNC_INTERVAL_SECONDS": 180,
+#    "per_user": {
+#      "276358220": {
+#        "SESSION_TIMEOUT_MINUTES": 1
+#      }
+#    }
+#  }
+# ============================================================
+
+def _get_session_config() -> dict:
+    """
+    Тянем конфиг трекинга сессий из feature_flags.
+    Если что-то не так — возвращаем {} и работаем на дефолтах.
+    """
+    try:
+        cfg = get_flag(_SESSION_CFG_KEY, default={})
+        if not isinstance(cfg, dict):
+            return {}
+        return cfg
+    except Exception as e:
+        logger.warning(f"[session_tracker] ⚠️ feature_flags error: {e}")
+        return {}
+
+
+def _get_session_timeout_for_user(user_id: int | None) -> int:
+    """
+    Возвращает таймаут сессии в минутах.
+    1) Берём общий SESSION_TIMEOUT_MINUTES из config или дефолта.
+    2) Если есть per_user-override для этого user_id — используем его.
+    """
+    cfg = _get_session_config()
+    default_timeout = cfg.get("SESSION_TIMEOUT_MINUTES", SESSION_TIMEOUT_MINUTES)
+
+    try:
+        default_timeout = int(default_timeout)
+    except (TypeError, ValueError):
+        default_timeout = SESSION_TIMEOUT_MINUTES
+
+    if user_id is None:
+        return default_timeout
+
+    per_user = cfg.get("per_user") or {}
+    # user_id может быть строкой или числом в JSON, подстрахуемся
+    user_cfg = (
+        per_user.get(str(user_id))
+        or per_user.get(user_id)
+    )
+
+    if isinstance(user_cfg, dict) and "SESSION_TIMEOUT_MINUTES" in user_cfg:
+        try:
+            return int(user_cfg["SESSION_TIMEOUT_MINUTES"])
+        except (TypeError, ValueError):
+            pass
+
+    return default_timeout
+
+
+def _get_sync_interval() -> int:
+    """
+    Интервал синка в секундах.
+    Общий (глобальный), но берётся через feature_flags.
+    """
+    cfg = _get_session_config()
+    value = cfg.get("SYNC_INTERVAL_SECONDS", SYNC_INTERVAL_SECONDS)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return SYNC_INTERVAL_SECONDS
+
+
 def get_current_session_id(user_id: int) -> str | None:
     ctx = user_data.get(user_id)
     return ctx.get("session_id") if ctx else None
+
 
 def touch_user_activity(
     user_id: int,
@@ -45,7 +131,7 @@ def touch_user_activity(
     # 👇 сохраняем последний известный username, если он есть
     if username is not None:
         ctx["username"] = username
-    
+
     # Нормализация
     for key in ("created_at", "last_seen"):
         v = ctx.get(key)
@@ -61,7 +147,8 @@ def touch_user_activity(
         if last_seen.tzinfo is None:
             last_seen = last_seen.replace(tzinfo=timezone.utc)
 
-        if (now - last_seen) <= timedelta(minutes=SESSION_TIMEOUT_MINUTES):
+        timeout_minutes = _get_session_timeout_for_user(user_id)
+        if (now - last_seen) <= timedelta(minutes=timeout_minutes):
             ctx["last_seen"] = now
             ctx["last_event"] = "activity"
             ctx["actions_count"] = int(ctx.get("actions_count", 0)) + 1
@@ -87,12 +174,14 @@ def touch_user_activity(
         ctx["device_info"] = device_info
 
     try:
-        supabase.table("push_queue") \
-            .delete() \
-            .eq("user_id", user_id) \
-            .eq("status", "pending") \
-            .neq("type", "premium_ritual") \
+        (
+            supabase.table("push_queue")
+            .delete()
+            .eq("user_id", user_id)
+            .eq("status", "pending")
+            .neq("type", "premium_ritual")
             .execute()
+        )
 
         logger.info(f"[session] 🧹 Cleared pending pushes except premium_ritual user={user_id}")
     except Exception as e:
@@ -115,6 +204,7 @@ def mark_seen(
         username=username,
     )
 
+
 def new_session_if_needed(
     user_id: int,
     *,
@@ -129,8 +219,8 @@ def new_session_if_needed(
         username=username,
     )
 
+
 async def sync_sessions_to_db():
-    timeout = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
     while True:
         try:
             now = _utcnow()
@@ -151,7 +241,8 @@ async def sync_sessions_to_db():
                 if last_seen.tzinfo is None:
                     last_seen = last_seen.replace(tzinfo=timezone.utc)
 
-                inactive = (now - last_seen) > timeout
+                timeout_minutes = _get_session_timeout_for_user(user_id)
+                inactive = (now - last_seen) > timedelta(minutes=timeout_minutes)
                 ended_at = last_seen if inactive else None
 
                 if inactive:
@@ -172,7 +263,11 @@ async def sync_sessions_to_db():
                         .eq("user_id", user_id)
                         .execute()
                     )
-                    unique_ids = {row.get("activity_id") for row in (fav_resp.data or []) if row.get("activity_id")}
+                    unique_ids = {
+                        row.get("activity_id")
+                        for row in (fav_resp.data or [])
+                        if row.get("activity_id")
+                    }
                     favorites_count = len(unique_ids)
                 except Exception as e:
                     logger.warning(f"[session_tracker] ⚠️ Favorites count error user={user_id}: {e}")
@@ -185,7 +280,7 @@ async def sync_sessions_to_db():
                 session_data = {
                     "session_id": sid,
                     "user_id": user_id,
-                    "username": ctx.get("username"),   # 👈 новое поле
+                    "username": ctx.get("username"),
                     "started_at": _iso(created_at),
                     "last_seen": _iso(last_seen),
                     "ended_at": _iso(ended_at),
@@ -220,24 +315,33 @@ async def sync_sessions_to_db():
                             if is_premium(user_id):
                                 # Новая редкая цепочка для подписчиков
                                 schedule_retention_nudges_subscribers(user_id)
-                                logger.info(f"[session_tracker] 📬 Retention-nudges SUBSCRIBERS scheduled for user={user_id}")
+                                logger.info(
+                                    f"[session_tracker] 📬 Retention-nudges SUBSCRIBERS scheduled for user={user_id}"
+                                )
                                 try:
                                     schedule_interview_invite(user_id)
                                 except Exception as e:
-                                    logger.error(f"[session_tracker] interview_invite error for user={user_id}: {e}")
+                                    logger.error(
+                                        f"[session_tracker] interview_invite error for user={user_id}: {e}"
+                                    )
                             else:
                                 # Бесплатный, который не достиг лимита
                                 schedule_retention_nudges(user_id)
-                                logger.info(f"[session_tracker] 📬 Retention-nudges scheduled for user={user_id}")
+                                logger.info(
+                                    f"[session_tracker] 📬 Retention-nudges scheduled for user={user_id}"
+                                )
 
                     except Exception as e:
                         logger.warning(f"[session_tracker] ❌ Push schedule error user={user_id}: {e}")
 
                     ctx["marked_ended"] = True
 
-            logger.info(f"[session_tracker] ✅ Synced sessions (active={active_count}, closed={closed_count})")
+            logger.info(
+                f"[session_tracker] ✅ Synced sessions (active={active_count}, closed={closed_count})"
+            )
 
         except Exception as e:
             logger.warning(f"[session_tracker] ❌ Sync error: {e}")
 
-        await asyncio.sleep(SYNC_INTERVAL_SECONDS)
+        interval = _get_sync_interval()
+        await asyncio.sleep(interval)
