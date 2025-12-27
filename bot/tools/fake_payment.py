@@ -2,70 +2,91 @@ import requests
 import hashlib
 import os
 import sys
+from dotenv import load_dotenv
 
-# --- НАСТРОЙКИ ---
-# Если ты на Replit, адрес будет localhost:8000 (или твой URL)
-TARGET_URL = "http://0.0.0.0:8000/robokassa/result" 
-# Или внешний URL, если ты хочешь проверить прод: 
-# TARGET_URL = "https://твое-приложение.replit.app/robokassa/result"
+# ---------------------------------------------------------
+# 1. РУЧНАЯ ЗАГРУЗКА ENV (КАК В CONFIG.PY)
+# ---------------------------------------------------------
+# Считаем, что запускаем из корня проекта ~/blizkie
+root_dir = os.path.abspath(".") 
 
-USER_ID = "276358220"  # Твой ID
+# 1) Грузим базовый .env
+base_env = os.path.join(root_dir, ".env")
+if os.path.exists(base_env):
+    load_dotenv(base_env)
+
+# 2) Определяем среду (dev/prod)
+env_mode = os.getenv("ENV", "dev")
+target_env_file = os.path.join(root_dir, f".env.{env_mode}")
+
+# 3) Грузим целевой .env (переопределяем значения)
+if os.path.exists(target_env_file):
+    load_dotenv(target_env_file, override=True)
+    print(f"✅ Загружен конфиг: .env.{env_mode}")
+else:
+    print(f"⚠️ Файл .env.{env_mode} не найден, используем базовый .env")
+
+# ---------------------------------------------------------
+# 2. НАСТРОЙКА ПУТЕЙ ДЛЯ ИМПОРТА
+# ---------------------------------------------------------
+# Добавляем 'bot' и корень в sys.path
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+bot_path = os.path.join(root_dir, "bot")
+if bot_path not in sys.path:
+    sys.path.insert(0, bot_path)
+
+# ---------------------------------------------------------
+# 3. ИМПОРТ И РАБОТА
+# ---------------------------------------------------------
+try:
+    from db.feature_flags import get_flag
+except ImportError as e:
+    print(f"❌ Ошибка импорта: {e}")
+    sys.exit(1)
+except Exception as e:
+    print(f"❌ Ошибка инициализации БД: {e}")
+    print("Проверь SUPABASE_URL и SUPABASE_KEY в .env!")
+    sys.exit(1)
+
+TARGET_URL = "http://127.0.0.1:8000/robokassa/result" 
+USER_ID = "276358220"
 AMOUNT = "490.00"
-INV_ID = "777"         # Фейковый номер счета
-
-# ВАЖНО: Пароль #2 от Робокассы (тот же, что в .env)
-# Если скрипт падает, впиши сюда пароль руками временно
-PASSWORD2 = os.getenv("ROBOKASSA_PASSWORD2", "TEST_PASS_2") 
+INV_ID = "777888" # Уникальный ID
 
 def send_fake_payment():
-    print(f"🚀 Имитируем оплату для user_id={USER_ID} на сумму {AMOUNT}...")
+    print("🔄 Тянем пароль из БД...")
+    rk_keys = get_flag("robokassa_keys", {})
+    password2 = rk_keys.get("password2")
 
-    # 1. Считаем подпись (MD5: OutSum:InvId:Password2)
-    # Робокасса может слать Shp_user, но в подписи его нет (стандартная формула)
-    sig_source = f"{AMOUNT}:{INV_ID}:{PASSWORD2}"
+    if not password2:
+        print("❌ Ошибка: password2 не найден в feature_flags!")
+        return
+
+    print(f"✅ Пароль получен: {password2[:3]}...{password2[-3:]}")
+
+    sig_source = f"{AMOUNT}:{INV_ID}:{password2}"
     signature = hashlib.md5(sig_source.encode()).hexdigest().upper()
 
-    print(f"🔑 Подпись (SignatureValue): {signature}")
-
-    # 2. Формируем данные (Form Data)
     payload = {
         "OutSum": AMOUNT,
         "InvId": INV_ID,
         "SignatureValue": signature,
-        "Shp_user": USER_ID,        # Твой ID (важно!)
-        "EMail": "test@fake.com",
+        "Shp_user": USER_ID,
+        "EMail": "autonomous_test@fake.com",
         "IncCurrLabel": "BankCard"
     }
 
-    # 3. Отправляем POST запрос
     try:
         response = requests.post(TARGET_URL, data=payload)
-
-        print("\n📡 Ответ сервера:")
-        print(f"Status Code: {response.status_code}")
-        print(f"Body: {response.text}")
-
-        if response.text.startswith("OK"):
-            print("\n✅ УСПЕХ! Сервер принял оплату.")
-            print("👉 Теперь проверь логи сервера и таблицы:")
-            print("   1. user_subscriptions (должна появиться подписка)")
-            print("   2. push_queue (должны исчезнуть старые пуши и появиться premium_welcome)")
+        print(f"\n📡 Ответ сервера: {response.status_code}")
+        if response.status_code == 200 and "OK" in response.text:
+            print("✅ УСПЕХ! Оплата прошла.")
         else:
-            print("\n❌ ОШИБКА! Сервер не принял оплату. Проверь пароль или логи.")
+            print(f"❌ ОШИБКА! Body: {response.text}")
 
     except Exception as e:
         print(f"\n💀 Ошибка соединения: {e}")
-        print("Убедись, что сервер (uvicorn) запущен!")
 
 if __name__ == "__main__":
-    # Пытаемся подгрузить конфиг, если скрипт запущен из корня
-    try:
-        sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-        import config
-        # Если в конфиге есть загрузка env, PASSWORD2 подтянется
-        if os.getenv("ROBOKASSA_PASSWORD2"):
-            PASSWORD2 = os.getenv("ROBOKASSA_PASSWORD2")
-    except ImportError:
-        pass
-
     send_fake_payment()
