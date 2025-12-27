@@ -3,7 +3,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from utils.amplitude_logger import log_event
 from utils.push_scheduler import schedule_paywall_followup
-from utils.paywall_guard import l0_views_count, _rules
+from utils.paywall_guard import l0_views_count, _rules, _get_trial_config
 from config import SUPPORT_USERNAME
 from handlers.user_state import user_data
 from db.supabase_client import supabase
@@ -139,13 +139,25 @@ def requisites_kb(settings: dict):
 # ============================================================
 
 async def send_universal_paywall(msg_or_cb, reason: str, user_id: int, session_id: str | None):
+    # --- ЛОГИКА ДЛЯ ANALYTICS ---
+    # Проверяем, включен ли сейчас режим триала в настройках
+    trial_days = _get_trial_config()
+
+    # Если триал глобально ВКЛЮЧЕН (не None), но мы всё равно показываем пэйволл,
+    # это гарантированно значит, что у этого юзера истёк срок триала.
+    # (Иначе paywall_guard вернул бы False и не пустил нас сюда).
+    if trial_days:
+        # Модифицируем причину для Amplitude. 
+        # Было: "l0_limit" -> Станет: "trial_expired_l0_limit"
+        reason = f"trial_expired_{reason}"
+
     settings = get_paywall_settings()
     text = _paywall_text(settings)
 
     log_event(
         user_id,
         "paywall_shown",
-        {"reason": reason},
+        {"reason": reason}, # <-- Теперь сюда пойдет уточненная причина
         session_id=session_id
     )
 
