@@ -263,20 +263,23 @@ async def robokassa_result(request: Request):
     ).execute()
 
     # ------------------------------
-    # CLEAR paywall_followup
+    # CLEAR OLD PUSHES (CLEAN SLATE)
     # ------------------------------
     try:
+        # Убиваем всё лишнее: и пейволл, и обычный ретеншен
+        types_to_kill = ["paywall_followup", "retention_nudge", "retention_nudge_subscribers"]
+
         supabase.table("push_queue") \
             .delete() \
             .eq("user_id", user_id) \
-            .eq("type", "paywall_followup") \
+            .in_("type", types_to_kill) \
             .eq("status", "pending") \
             .execute()
 
-        print(f"🧹 Cleared pending paywall_followup for user={user_id}")
+        print(f"🧹 Cleared ALL pending retention pushes for user={user_id}")
     except Exception as e:
-        print(f"⚠️ Failed to clear paywall_followup for user={user_id}: {e}")
-
+        print(f"⚠️ Failed to clear old pushes for user={user_id}: {e}")
+        
     # ------------------------------
     # LOG EVENT В AMPLITUDE
     # ------------------------------

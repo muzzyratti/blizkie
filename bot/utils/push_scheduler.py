@@ -72,6 +72,19 @@ def schedule_retention_nudges(user_id: int):
     Прод: берём накапливаемые часы из nudge_delays_hours.
     """
 
+    # [FIX] 1. Если у юзера активна Paywall-воронка, обычный Retention не ставим (приоритет продажам)
+    active_paywall = (
+        supabase.table("push_queue")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("type", "paywall_followup")
+        .eq("status", "pending")
+        .execute()
+    )
+    if active_paywall.data:
+        logger.info(f"[push_scheduler] 🛡 Skip retention_nudge user={user_id}, active paywall chain exists")
+        return
+    
     # предотвращаем повторное создание цепочки
     existing = (
         supabase.table("push_queue")
@@ -113,23 +126,23 @@ def schedule_retention_nudges(user_id: int):
                 }
             )
     else:
+    # [FIX] Математика: берем абсолютные часы из конфига, без суммирования
         hours = cfg.get("nudge_delays_hours") or [24, 72, 168, 336]
-        acc_h = 0
+    
         for i, h in enumerate(hours, start=1):
             try:
-                acc_h += int(h)
+                offset_val = int(h)
+                when = now + timedelta(hours=offset_val)
+    
+                rows.append({
+                    "user_id": user_id, 
+                    "type": "retention_nudge", 
+                    "status": "pending",
+                    "scheduled_at": _iso(when), 
+                    "payload": {"step": i}
+                })
             except Exception:
                 continue
-            when = now + timedelta(hours=acc_h)
-            rows.append(
-                {
-                    "user_id": user_id,
-                    "type": "retention_nudge",
-                    "payload": {"step": i},
-                    "scheduled_at": _iso(when),
-                    "status": "pending",
-                }
-            )
 
     if rows:
         supabase.table("push_queue").insert(rows).execute()
@@ -147,6 +160,17 @@ def schedule_paywall_followup(user_id: int, *, reason: str | None = None):
       24ч, 72ч, 120ч (5д), 240ч (10д)
     """
 
+    # [FIX] 1. Убиваем обычный Retention, так как переходим к агрессивной продаже
+    try:
+        supabase.table("push_queue").delete()\
+            .eq("user_id", user_id)\
+            .eq("type", "retention_nudge")\
+            .eq("status", "pending")\
+            .execute()
+        logger.info(f"[push_scheduler] 🔪 Killed retention_nudge for user={user_id} in favor of paywall")
+    except Exception as e:
+        logger.warning(f"[push_scheduler] Failed to cleanup retention_nudge: {e}")
+    
     # предотвращаем повторное создание цепочки
     existing = (
         supabase.table("push_queue")
@@ -188,23 +212,29 @@ def schedule_paywall_followup(user_id: int, *, reason: str | None = None):
                 }
             )
     else:
+    # [FIX] Математика абсолютная + дедупликация (чтобы не ставить два пуша на 120 час)
         hours = cfg.get("paywall_followup_hours") or [24, 72, 120, 240]
-        acc_h = 0
-        for i, h in enumerate(hours, start=1):
+    
+        seen_hours = set()
+        step = 1
+        for h in hours:
             try:
-                acc_h += int(h)
+                val = int(h)
+                if val in seen_hours:
+                    continue # Пропускаем дубликаты времени
+                seen_hours.add(val)
+    
+                when = now + timedelta(hours=val)
+                rows.append({
+                    "user_id": user_id, 
+                    "type": "paywall_followup", 
+                    "status": "pending",
+                    "scheduled_at": _iso(when), 
+                    "payload": {"step": step, "reason": reason}
+                })
+                step += 1
             except Exception:
                 continue
-            when = now + timedelta(hours=acc_h)
-            rows.append(
-                {
-                    "user_id": user_id,
-                    "type": "paywall_followup",
-                    "payload": {"step": i, "reason": reason},
-                    "scheduled_at": _iso(when),
-                    "status": "pending",
-                }
-            )
 
     if rows:
         supabase.table("push_queue").insert(rows).execute()
@@ -348,23 +378,22 @@ def schedule_retention_nudges_subscribers(user_id: int):
                 }
             )
     else:
-        hours = cfg.get("subscriber_nudge_delays_hours") or [48, 240]
-        acc_h = 0
+        # [FIX] Математика абсолютная. Дефолты: 3 дня (72ч) и 5 дней (120ч)
+        hours = cfg.get("subscriber_nudge_delays_hours") or [72, 120]
+    
         for i, h in enumerate(hours, start=1):
             try:
-                acc_h += int(h)
+                val = int(h)
+                when = now + timedelta(hours=val)
+                rows.append({
+                    "user_id": user_id, 
+                    "type": "retention_nudge_subscribers", 
+                    "status": "pending",
+                    "scheduled_at": _iso(when), 
+                    "payload": {"step": i}
+                })
             except Exception:
                 continue
-            when = now + timedelta(hours=acc_h)
-            rows.append(
-                {
-                    "user_id": user_id,
-                    "type": "retention_nudge_subscribers",
-                    "payload": {"step": i},
-                    "scheduled_at": _iso(when),
-                    "status": "pending",
-                }
-            )
 
     if rows:
         supabase.table("push_queue").insert(rows).execute()

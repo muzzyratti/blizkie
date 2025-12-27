@@ -89,10 +89,11 @@ def should_block_l0(user_id: int) -> bool:
 
 def is_user_limited(user_id: int) -> bool:
     """
-    True, если юзер достиг лимита бесплатных L1 карточек.
+    True, если юзер достиг ЛЮБОГО лимита (L1 или L0).
     """
     try:
-        return should_block_l1(user_id)   # <-- вот правильная проверка лимита
+        # Проверяем оба условия. Если хотя бы одно True — юзер лимитирован.
+        return should_block_l1(user_id) or should_block_l0(user_id)
     except Exception as e:
         print(f"[paywall_guard] is_user_limited err user={user_id}: {e}")
         return False
