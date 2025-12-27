@@ -1,5 +1,6 @@
 import asyncio
 import time
+import random
 from datetime import datetime, timedelta, timezone
 
 from db.supabase_client import supabase
@@ -7,7 +8,6 @@ from utils.logger import setup_logger
 from db.feature_flags import get_flag
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
-from db.feature_flags import get_flag
 from utils.amplitude_logger import log_event
 
 logger = setup_logger()
@@ -117,13 +117,35 @@ async def _process_push(row: dict, cfg: dict, bot):
     if push_type == "premium_welcome":
         logger.info(f"[push_worker] premium_welcome — bypass all limits for push_id={push_id}")
     else:
+        # 1. Проверка Quiet Hours (FIX: ПЕРЕНОС В БУДУЩЕЕ ВМЕСТО ПРОПУСКА)
         if _in_quiet_hours(now, cfg):
-            logger.info(f"[push_worker] Quiet hours — skip push_id={push_id}")
-            return
+            next_start = _next_quiet_end(now, cfg)
 
-        cap = int(cfg.get("global_daily_cap", 100))
+            # Добавляем случайные 1-10 минут (jitter), чтобы не было лавины сообщений ровно в 09:00
+            import random
+            jitter = random.randint(60, 600)
+            new_scheduled = next_start + timedelta(seconds=jitter)
+
+            logger.info(f"[push_worker] 🌙 Quiet hours hit. Rescheduling push_id={push_id} to {_iso(new_scheduled)}")
+
+            # Обновляем время в базе, чтобы воркер перешел к следующему пушу
+            supabase.table("push_queue").update({
+                "scheduled_at": _iso(new_scheduled)
+            }).eq("id", push_id).execute()
+            return  # Теперь выходим, но пуш уже не "pending на сейчас", а "pending на утро"
+
+        # 2. Проверка Global Cap (FIX: ПЕРЕНОС НА ЗАВТРА ВМЕСТО ПРОПУСКА)
+        # Поднимаем дефолтный лимит до 5000, чтобы не блокировать отправку днем
+        cap = int(cfg.get("global_daily_cap", 5000)) 
         if _global_cap_reached(now, cap):
-            logger.warning(f"[push_worker] Daily cap reached — skip push_id={push_id}")
+            tomorrow = now + timedelta(days=1)
+
+            logger.warning(f"[push_worker] 🛑 Daily cap reached ({cap}). Rescheduling push_id={push_id} to {_iso(tomorrow)}")
+
+            # Переносим пуш на завтра
+            supabase.table("push_queue").update({
+                "scheduled_at": _iso(tomorrow)
+            }).eq("id", push_id).execute()
             return
 
     markup = None
