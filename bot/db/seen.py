@@ -1,7 +1,7 @@
 from datetime import datetime
 from db.supabase_client import supabase, TIME_MAP, ENERGY_MAP, location_MAP
 import logging
-from random import choice
+from random import choice, random
 
 
 def _norm(s):
@@ -9,20 +9,29 @@ def _norm(s):
 
 
 def _matches_multivalue(user_value: str, activity_value: str) -> bool:
-    """
-    user_value: то, что выбрал пользователь (например "home" или "15")
-    activity_value: то, что лежит в базе (например "Дома, На улице" или "15 мин, 30 мин")
-
-    Логика:
-    1. маппим user_value через соответствующий MAP в человекочитаемый вид,
-       чтобы сравнивать с тем, что лежит в базе
-    2. режем activity_value по запятым и обрезаем пробелы
-    3. сравниваем по нормализованной строке (lower/strip)
-    """
-    if activity_value is None:
+    if not activity_value:
         return False
-
+    if not user_value:
+        return True
     return _norm(user_value) in _norm(activity_value)
+
+
+def _check_age_overlap(user_min, user_max, act_min, act_max):
+    if act_min is None or act_max is None: return False
+    if user_min is None or user_max is None: return True
+    try:
+        act_min, act_max = int(act_min), int(act_max)
+    except ValueError:
+        return False
+    return not (act_max < user_min or act_min > user_max)
+
+
+def _has_video(activity: dict) -> bool:
+    """Проверяет наличие видео в активности (dev или prod поле)."""
+    vid_dev = str(activity.get("video_file_id") or "")
+    vid_prod = str(activity.get("video_file_id_prod") or "")
+    # Считаем, что видео есть, если строка длиннее 5 символов
+    return (len(vid_dev) > 5) or (len(vid_prod) > 5)
 
 
 def get_next_activity_with_filters(user_id: int,
@@ -31,101 +40,110 @@ def get_next_activity_with_filters(user_id: int,
                                    time_required: str,
                                    energy: str,
                                    location: str):
+
+    # 0. Инфо
     logging.info(
-        f"[🔍 filters] user={user_id}, age_min={age_min}, age_max={age_max}, "
-        f"time_required={time_required}, energy={energy}, location={location}"
+        f"[🔍 ФИЛЬТРЫ] Юзер={user_id} | Возраст={age_min}-{age_max} | "
+        f"Время={time_required} | Энергия={energy} | Место={location}"
     )
 
-    # 1. маппинг значений из кодов пользователя -> человекочитаемые строки из базы
     mapped_time = TIME_MAP.get(time_required, time_required)
     mapped_energy = ENERGY_MAP.get(energy, energy)
     mapped_location = location_MAP.get(location, location)
 
-    # 2. тащим все активности целиком
+    # 1. Загрузка данных
     activities_resp = supabase.table("activities").select("*").execute()
-    activities = activities_resp.data or []
-    logging.info(f"[📦 all_activities] всего {len(activities)} в базе")
+    all_activities = activities_resp.data or []
 
-    # 3. фильтруем активности питоном
-    suitable_ids = []
-    for a in activities:
-        a_age_min = a.get("age_min")
-        a_age_max = a.get("age_max")
-        a_time = a.get("time_required", "")
-        a_energy = a.get("energy", "")
-        a_location = a.get("location", "")
+    seen_resp = supabase.table("seen_activities").select("activity_id").eq("user_id", user_id).execute()
+    seen_ids = set(row["activity_id"] for row in (seen_resp.data or []))
 
-        # возрастная проверка:
-        # считаем, что игра подходит, если диапазоны пересекаются
-        # (активность [a_min..a_max] пересекается с выбранной группой [age_min..age_max])
-        if a_age_min is None or a_age_max is None:
-            continue
-        try:
-            a_age_min = int(a_age_min)
-            a_age_max = int(a_age_max)
-        except ValueError:
-            continue
+    # 2. Логика Новичка (Onboarding: первые 5 идей)
+    force_video_onboarding = len(seen_ids) < 5
 
-        age_overlap = not (a_age_max < age_min or a_age_min > age_max)
-        if not age_overlap:
-            continue
+    if force_video_onboarding:
+        logging.info(f"[👶 НОВИЧОК] Просмотрено: {len(seen_ids)}. Режим: СТРОГО ВИДЕО 🎥")
 
-        # проверка времени: выбранное значение должно "входить" в строку активности
-        if not _matches_multivalue(mapped_time, a_time):
-            continue
+    candidates_pool = []
 
-        # проверка энергии
-        if not _matches_multivalue(mapped_energy, a_energy):
-            continue
+    # Формируем пул кандидатов
+    for a in all_activities:
+        if a["id"] in seen_ids: continue
 
-        # проверка локации
-        if not _matches_multivalue(mapped_location, a_location):
-            continue
+        # Если это онбординг, мы жестко фильтруем без видео
+        if force_video_onboarding:
+            if not _has_video(a):
+                continue
 
-        suitable_ids.append(a.get("id"))
+        candidates_pool.append(a)
 
-    logging.info(f"[✅ suitable_ids] найдено {len(suitable_ids)} штук: {suitable_ids}")
+    # Лог размера пула
+    pool_ids = [a['id'] for a in candidates_pool]
+    # Ограничиваем вывод ID в лог, чтобы не спамить
+    preview = str(pool_ids[:10]) + ("..." if len(pool_ids) > 10 else "")
+    logging.info(f"[🎱 ПУЛ] Кандидатов: {len(pool_ids)}. Первые ID: {preview}")
 
-    if not suitable_ids:
-        logging.warning("[❌ empty] Нет подходящих активностей в базе по выбранным фильтрам")
-        return None, False
+    # Fallback для онбординга: если с видео совсем пусто, снимаем блок
+    if force_video_onboarding and not candidates_pool:
+        logging.warning("[⚠️ ВНИМАНИЕ] Идеи с видео закончились! Снимаем ограничение новичка.")
+        candidates_pool = [a for a in all_activities if a["id"] not in seen_ids]
 
-    # 4. достаём уже показанные сессии для ЭТИХ ЖЕ фильтров
-    seen_resp = supabase.table("seen_activities") \
-        .select("activity_id") \
-        .eq("user_id", user_id) \
-        .eq("age_min", age_min) \
-        .eq("age_max", age_max) \
-        .eq("time_required", time_required) \
-        .eq("energy", energy) \
-        .eq("location", location) \
-        .execute()
+    # 3. Smart Fallback Loop + Soft Priority
+    strategies = [
+        ("1. Строгое совпадение", True, True, True, True),
+        ("2. Игнорируем время ⏳", True, False, True, True),
+        ("3. Игнорируем время+энергию ⚡️", True, False, False, True),
+        ("4. Игнорируем возраст (только место) 🌍", False, False, False, True),
+        ("5. Показать любую доступную 🎲", False, False, False, False)
+    ]
 
-    seen_ids = [row["activity_id"] for row in (seen_resp.data or [])]
-    logging.info(f"[👁️ seen_ids] уже показано {len(seen_ids)}: {seen_ids}")
+    selected_id = None
 
-    # 5. находим те, что еще не показывали
-    unseen_ids = [aid for aid in suitable_ids if aid not in seen_ids]
-    logging.info(f"[🆕 unseen_ids] осталось {len(unseen_ids)} непросмотренных")
+    for name, use_age, use_time, use_energy, use_loc in strategies:
+        matches = []
+        for a in candidates_pool:
+            if use_age and not _check_age_overlap(age_min, age_max, a.get("age_min"), a.get("age_max")): continue
+            if use_time and not _matches_multivalue(mapped_time, a.get("time_required")): continue
+            if use_energy and not _matches_multivalue(mapped_energy, a.get("energy")): continue
+            if use_loc and not _matches_multivalue(mapped_location, a.get("location")): continue
 
-    if unseen_ids:
-        selected = choice(unseen_ids)
-        logging.info(f"[🎯 pick] показываем id={selected}")
-        return selected, False  # False = не ресетили
+            # Сохраняем весь объект активности, чтобы потом проверить видео
+            matches.append(a)
 
-    # если всё уже показали, чистим историю просмотров по этим фильтрам и начинаем заново
-    logging.info("[♻️ reset] все активности просмотрены — очищаем seen_activities для этих фильтров")
+        if matches:
+            # === SOFT PRIORITY LOGIC (70/30) ===
+            video_matches = [m for m in matches if _has_video(m)]
+            text_matches = [m for m in matches if not _has_video(m)]
 
-    supabase.table("seen_activities") \
-        .delete() \
-        .eq("user_id", user_id) \
-        .eq("age_min", age_min) \
-        .eq("age_max", age_max) \
-        .eq("time_required", time_required) \
-        .eq("energy", energy) \
-        .eq("location", location) \
-        .execute()
+            final_choice = None
 
-    selected = choice(suitable_ids)
-    logging.info(f"[🔄 after reset] снова показываем id={selected}")
-    return selected, True  # True = был ресет
+            # 1. Если есть только один тип контента — выбора нет
+            if not video_matches:
+                final_choice = choice(text_matches)
+                logging.info(f"[⚖️ ВЫБОР] Только текст. (Видео нет в этой выборке)")
+            elif not text_matches:
+                final_choice = choice(video_matches)
+                logging.info(f"[⚖️ ВЫБОР] Только видео. (Текста нет в этой выборке)")
+            else:
+                # 2. Если есть и то и другое — кидаем кубик
+                # 0.7 = 70% вероятность выбрать видео
+                if random() < 0.7:
+                    final_choice = choice(video_matches)
+                    logging.info(f"[⚖️ ВЫБОР] 🎲 Выпало ВИДЕО (Вероятность 70%)")
+                else:
+                    final_choice = choice(text_matches)
+                    logging.info(f"[⚖️ ВЫБОР] 🎲 Выпал ТЕКСТ (Вероятность 30%)")
+
+            selected_id = final_choice["id"]
+
+            logging.info(f"[✅ НАЙДЕНО] Стратегия: '{name}'. Кандидатов: {len(matches)}. Выбран ID: {selected_id}")
+            break
+
+    if selected_id:
+        return selected_id, False
+
+    # 4. Глобальный сброс
+    logging.info("[♻️ ГЛОБАЛЬНЫЙ СБРОС] Просмотрено вообще всё. Очистка истории.")
+    supabase.table("seen_activities").delete().eq("user_id", user_id).execute()
+    logging.info("[🔄 РЕСТАРТ] Поиск заново...")
+    return get_next_activity_with_filters(user_id, age_min, age_max, time_required, energy, location)
