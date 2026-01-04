@@ -12,6 +12,7 @@ from utils.paywall_guard import should_block_l1, should_block_l0
 from handlers.paywall import send_universal_paywall
 from utils.session_tracker import get_current_session_id
 from config import ENV
+from db.feature_flags import is_enabled, get_flag
 
 activities_router = Router()
 
@@ -38,6 +39,12 @@ def check_is_favorite(user_id: int, activity_id: int) -> bool:
     except:
         return False
 
+def get_community_btn():
+    """Вспомогательная функция для получения кнопки клуба по флагу"""
+    if is_enabled("community_club", default=False):
+        config = get_flag("community_club")
+        return [InlineKeyboardButton(text=config.get("text", "Вступить в клуб родителей 🎁"),                    callback_data="community_join")]
+    return None
 
 async def render_l0_card(message_or_callback,
                          activity,
@@ -58,21 +65,31 @@ async def render_l0_card(message_or_callback,
             f"📦 Материалы: {activity['materials'] or 'Не требуются'}"
             f"{VIRAL_SIGNATURE}")
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    kb_rows = [
         [
             InlineKeyboardButton(
                 text="Играем ▶️",
                 callback_data=f"activity_details:{activity['id']}")
-        ], [InlineKeyboardButton(text=fav_text, callback_data=fav_callback)],
+        ], 
+        [InlineKeyboardButton(text=fav_text, callback_data=fav_callback)],
         [
             InlineKeyboardButton(text="Следующую ⏩️",
                                  callback_data="activity_next")
-        ],
-        [
-            InlineKeyboardButton(text="Поменять фильтры 🎛️",
-                                 callback_data="update_filters")
         ]
+    ]
+
+    # Добавляем кнопку клуба, если она включена
+    club_btn = get_community_btn()
+    if club_btn:
+        kb_rows.append(club_btn)
+
+    # Добавляем кнопку фильтров в конец
+    kb_rows.append([
+        InlineKeyboardButton(text="Поменять фильтры 🎛️",
+                             callback_data="update_filters")
     ])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
     # === ЛОГИКА ВЫБОРА ВИДЕО ===
     video_file_id = None
@@ -342,33 +359,34 @@ async def show_activity_details(callback: types.CallbackQuery):
         "text": full_text
     }
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    # Динамическая сборка для L1
+    kb_rows = [
         [
             InlineKeyboardButton(
                 text="В любимые ❤️" if not is_favorite else "Убрать из ❤️",
-                callback_data=
-                f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}"
+                callback_data=f"{'favorite_add' if not is_favorite else 'remove_fav'}:{activity_id}"
             )
         ],
         [
             InlineKeyboardButton(text="Следующую ⏩️",
                                  callback_data="activity_next")
-        ],
-        [
-            InlineKeyboardButton(text="Поменять фильтры 🎛️",
-                                 callback_data="update_filters")
-        ],
-        [
-            InlineKeyboardButton(text="Поделиться ↩️",
-                                 callback_data=f"share_activity:{activity_id}")
-        ],
-        [
-            InlineKeyboardButton(
-                text="💬 Оставить отзыв",
-                callback_data=f"feedback_button:{activity_id}")
         ]
+    ]
+
+    # Добавляем клуб
+    club_btn = get_community_btn()
+    if club_btn:
+        kb_rows.append(club_btn)
+
+    # Остальные системные кнопки
+    kb_rows.extend([
+        [InlineKeyboardButton(text="Поменять фильтры 🎛️", callback_data="update_filters")],
+        [InlineKeyboardButton(text="Поделиться ↩️", callback_data=f"share_activity:{activity_id}")],
+        [InlineKeyboardButton(text="💬 Оставить отзыв", callback_data=f"feedback_button:{activity_id}")]
     ])
 
+    keyboard = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    
     message = callback.message
     has_media = message.content_type in ['video', 'photo']
     final_caption = f"{caption_title}\n\n{full_text}"
@@ -453,3 +471,37 @@ async def show_activity_details(callback: types.CallbackQuery):
         await callback.answer()
     except:
         pass
+
+
+@activities_router.callback_query(F.data == "community_join")
+async def community_join_handler(callback: types.CallbackQuery):
+    """
+    Логирует нажатие и выдает ссылку на чат.
+    """
+    user_id = callback.from_user.id
+    session_id = get_current_session_id(user_id)
+
+    # Получаем конфиг из флагов
+    config = get_flag("community_club", {
+        "url": "https://t.me/+ваша_ссылка", 
+        "text": "Вступить в клуб родителей 🎁"
+    })
+
+    # Логируем в Amplitude
+    amplitude_log_event(
+        user_id=user_id, 
+        event_name="community_join_click", 
+        session_id=session_id
+    )
+
+    await callback.answer() # Убираем часики
+
+    await callback.message.answer(
+        f"🎉 *Добавляйтесь в наш клуб!*\n\n"
+        f"Это закрытый чат для своих. Там мы делимся идеями как провести время с детьми.\n\n"
+        f"👇 Жми на кнопку, чтобы вступить:",
+        parse_mode="Markdown", #
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Присоединиться к чату 🔗", url=config["url"])]
+        ])
+    )
